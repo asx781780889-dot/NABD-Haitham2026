@@ -1,0 +1,31 @@
+# Render blueprint (verify field names against the current Render docs before use).
+# Web + Worker are separate services; PostgreSQL and Redis (Key Value) are managed add-ons.
+services:
+  - type: web
+    name: nabd-web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /ready
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: HOST, value: 0.0.0.0 }
+      - { key: TRUST_PROXY, value: "true" }
+      - { key: MASTER_KEY, generateValue: true }
+      - { key: DATABASE_URL, fromDatabase: { name: nabd-db, property: connectionString } }
+      - { key: REDIS_URL, fromService: { type: keyvalue, name: nabd-redis, property: connectionString } }
+  - type: worker
+    name: nabd-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node src/worker.js
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: MASTER_KEY, sync: false }   # must equal the web service's MASTER_KEY: copy it manually
+      - { key: DATABASE_URL, fromDatabase: { name: nabd-db, property: connectionString } }
+      - { key: REDIS_URL, fromService: { type: keyvalue, name: nabd-redis, property: connectionString } }
+  - type: keyvalue
+    name: nabd-redis
+    ipAllowList: []
+databases:
+  - name: nabd-db
+    plan: basic-256mb
