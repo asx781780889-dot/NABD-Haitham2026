@@ -1,0 +1,46 @@
+# Local / server deployment:  cp .env.example .env  (set MASTER_KEY + POSTGRES_PASSWORD)  &&  docker compose up -d --build
+# Services: frontend (nginx) · backend (API + WebSocket) · worker · postgres · redis
+x-app: &app
+  build: .
+  restart: unless-stopped
+  env_file: .env
+  environment: &appenv
+    NODE_ENV: production
+    HOST: 0.0.0.0
+    DATABASE_URL: postgres://nabd:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/nabd
+    REDIS_URL: redis://redis:6379
+    DATA_DIR: /data
+    TRUST_PROXY: "true"
+  volumes: [nabd-data:/data]
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  frontend:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports: ["${HTTP_PORT:-8080}:80"]
+    volumes: ["./public:/usr/share/nginx/html:ro", "./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    depends_on: [backend]
+  backend:
+    <<: *app
+    command: ["node", "src/server.js"]
+    environment: { <<: *appenv, SERVE_STATIC: "false" }
+  worker:
+    <<: *app
+    command: ["node", "src/worker.js"]
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment: { POSTGRES_USER: nabd, POSTGRES_DB: nabd, POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}" }
+    volumes: [pg-data:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U nabd -d nabd"], interval: 5s, timeout: 5s, retries: 20 }
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes: [redis-data:/data]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 20 }
+
+volumes: { nabd-data: {}, pg-data: {}, redis-data: {} }
