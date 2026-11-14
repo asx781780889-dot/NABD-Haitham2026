@@ -29,7 +29,7 @@ export function matchCard(c, { onChange, onRemove, fresh = false, compact = fals
   const tip = (ic, title, fn, kind) => iconBtn(ic, title, fn, kind);
   const el = h('article', { class: `mc p-${c.priority} ${fresh ? 'fresh' : ''} ${c.status === 'ignored' ? 'ignored' : ''}`, 'data-id': c.id },
     h('div', { class: 'ring', style: { '--p': c.score, '--ringc': RING[c.priority] }, title: t('Match') }, h('b', null, `${Math.round(c.score)}%`)),
-    h('div', { class: 'meta' }, prioBadge(c.priority), badge(t(cap(c.match_type)), 'info'), c.intent && badge(c.intent, 'ok'), c.keyword && h('span', { class: 'chip' }, icon('tag', 13), c.keyword),
+    h('div', { class: 'meta' }, prioBadge(c.priority), badge(t(cap(c.match_type)), 'info'), c.ad_label && badge(`${t(c.ad_label === 'ad' ? 'Advertiser' : c.ad_label === 'suspect' ? 'Suspect' : 'Trusted')} ${Math.round(c.ad_score ?? 0)}%`, c.ad_label === 'ad' ? 'danger' : c.ad_label === 'suspect' ? 'warn' : 'ok'), c.intent && badge(c.intent, 'ok'), c.keyword && h('span', { class: 'chip' }, icon('tag', 13), c.keyword),
       c.pinned && h('span', { class: 'chip' }, icon('pin', 13)), c.saved && h('span', { class: 'chip' }, icon('bookmark', 13)), c.ai_degraded && badge(t('degraded: keywords only'), 'warn'),
       h('span', { class: 'end num xs' }, `${fmt.date(c.sent_at)} ${fmt.time(c.sent_at)}`)),
     h('div', { class: 'meta' }, h('span', { class: 'b', style: { color: 'var(--text)' } }, who), c.sender.id != null && h('span', { class: 'mono xs' }, `ID ${c.sender.id}`), h('span', null, '·'),
@@ -52,6 +52,8 @@ export function matchCard(c, { onChange, onRemove, fresh = false, compact = fals
       op && tip('trash', t('Delete'), async () => { if (await confirmBox(t('Delete this card?'), { danger: true, ok: t('Delete') })) remove(() => del(`/matches/${c.id}`)); }, 'danger'),
       op && h('span', { class: 'end row tight' },
         tip('up', t('Correct match'), act(() => post(`/matches/${c.id}/feedback`, { value: 'correct' })), c.feedback === 'correct' ? 'on' : ''),
-        tip('dn', t('Incorrect match'), act(() => post(`/matches/${c.id}/feedback`, { value: 'incorrect' })), c.feedback === 'incorrect' ? 'on' : ''))));
+        tip('dn', t('Incorrect match'), act(() => post(`/matches/${c.id}/feedback`, { value: 'incorrect' })), c.feedback === 'incorrect' ? 'on' : ''),
+        op && tip('megaphone', t('Advertiser'), act(() => post('/ads/feedback', { text: c.text ?? '', label: 'ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'ad' ? 'on' : ''),
+        op && tip('user', t('Not an advertiser'), act(() => post('/ads/feedback', { text: c.text ?? '', label: 'not_ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'clean' ? 'on' : ''))));
   return el;
 }

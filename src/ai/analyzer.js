@@ -1,7 +1,7 @@
 // Per-message analysis against a radar intent + defensive JSON parsing and result caching.
 import { z } from 'zod';
 import { complete } from './manager.js';
-import { ANALYZER_SYSTEM, analyzerUserPrompt } from './prompts.js';
+import { ANALYZER_SYSTEM, analyzerUserPrompt, AD_SYSTEM, adUserPrompt } from './prompts.js';
 import { getSetting } from '../lib/settings.js';
 import { safeRedis } from '../lib/redis.js';
 import { AppError } from '../lib/errors.js';
@@ -44,6 +44,19 @@ export async function analyzeForRadar({ radar, text, normHash, sourceTitle, exam
     category: useClass ? parsed.category : '', priority: useClass ? parsed.priority : null, entities, reason: parsed.reason,
     suggested: parsed.suggested_keywords, provider: res.provider, model: res.model, latencyMs: res.latencyMs, tokensIn: res.tokensIn ?? null, tokensOut: res.tokensOut ?? null,
   };
+  if (normHash) await safeRedis((r) => r.set(key, JSON.stringify(out), 'EX', 86400));
+  return out;
+}
+
+const adSchema = z.object({ role: z.enum(['seeker', 'advertiser', 'other']), confidence: z.coerce.number().min(0).max(100), reason: z.string().max(160).catch('') });
+export async function classifyAd({ text, normHash, sourceTitle, examples = [] }) {
+  const key = `ad:v1:1:${normHash}`;
+  const cached = normHash ? await safeRedis((r) => r.get(key)) : null;
+  if (cached) { try { return { ...JSON.parse(cached), cached: true }; } catch { /* recompute */ } }
+  const res = await complete({ purpose: 'ad_classify', system: AD_SYSTEM, user: adUserPrompt({ text, sourceTitle, examples }), json: true, maxTokens: 180, temperature: 0 });
+  let parsed;
+  try { parsed = adSchema.parse(parseAiJson(res.text)); } catch (e) { throw new AppError('AI_UNAVAILABLE', { status: 502, message: `unparseable ad response: ${e.message}` }); }
+  const out = { ...parsed, provider: res.provider, model: res.model, latencyMs: res.latencyMs, tokensIn: res.tokensIn ?? null, tokensOut: res.tokensOut ?? null };
   if (normHash) await safeRedis((r) => r.set(key, JSON.stringify(out), 'EX', 86400));
   return out;
 }

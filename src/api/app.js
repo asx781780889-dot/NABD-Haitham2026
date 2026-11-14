@@ -15,6 +15,7 @@ import sourceRoutes from './routes/sources.js';
 import matchRoutes from './routes/matches.js';
 import radarRoutes from './routes/radar.js';
 import systemRoutes from './routes/system.js';
+import adsRoutes from './routes/ads.js';
 
 export function createApp({ getWsClients = () => 0 } = {}) {
   const app = express();
@@ -67,6 +68,7 @@ export function createApp({ getWsClients = () => 0 } = {}) {
   app.use('/api/sources', sourceRoutes);
   app.use('/api', matchRoutes);
   app.use('/api', radarRoutes);
+  app.use('/api', adsRoutes);
   app.use('/api', systemRoutes);
   app.use('/api', notFound);
 

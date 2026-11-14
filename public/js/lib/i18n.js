@@ -1,6 +1,6 @@
 // English strings are the keys; Arabic translations live here. Missing keys fall back to English (never breaks the UI).
 const AR = {
-  'Dashboard': 'لوحة التحكم', 'Telegram Accounts': 'حسابات Telegram', 'Accounts': 'الحسابات', 'Sources': 'المصادر', 'Smart Radar': 'الرادار الذكي', 'Keywords': 'الكلمات المفتاحية', 'Rules': 'القواعد',
+  'Dashboard': 'لوحة التحكم', 'Telegram Accounts': 'حسابات Telegram', 'Accounts': 'الحسابات', 'Sources': 'المصادر', 'Smart Radar': 'الرادار الذكي', 'Keywords': 'الكلمات المفتاحية', 'Rules': 'القواعد', 'Advertisers': 'المعلنون', 'Advertiser': 'معلن', 'Suspect': 'مشتبه', 'Trusted': 'موثوق', 'Unknown': 'غير معروف', 'Ad score': 'نسبة الإعلان', 'Ad messages': 'رسائل إعلانية', 'No advertisers yet.': 'لا يوجد معلنون بعد.',
   'Automation': 'الأتمتة', 'Live Feed': 'البث المباشر', 'Saved': 'المحفوظات', 'Search': 'البحث', 'Analytics': 'التحليلات', 'Reports': 'التقارير', 'Alerts': 'التنبيهات', 'Blocks': 'الحظر',
   'AI Settings': 'إعدادات الذكاء الاصطناعي', 'Tasks': 'المهام', 'System': 'النظام', 'Logs': 'السجلات', 'Settings': 'الإعدادات', 'Operations': 'العمليات', 'Intelligence': 'الذكاء', 'Insights': 'الرؤى', 'Administration': 'الإدارة',
   'Sign in': 'تسجيل الدخول', 'Sign out': 'تسجيل الخروج', 'Username': 'اسم المستخدم', 'Password': 'كلمة المرور', 'Welcome back': 'مرحبًا بعودتك', 'Loading…': 'جارٍ التحميل…', 'Save': 'حفظ', 'Cancel': 'إلغاء', 'Close': 'إغلاق',

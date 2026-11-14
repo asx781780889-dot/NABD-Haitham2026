@@ -2,7 +2,7 @@
 import { many } from '../lib/db.js';
 import { telegramLinks } from '../telegram/links.js';
 
-export const CARD_SELECT = `SELECT mm.id, mm.message_id, mm.score, mm.bucket, mm.match_type, mm.priority, mm.intent, mm.ai_confidence, mm.ai_reason,
+export const CARD_SELECT = `SELECT mm.id, mm.message_id, mm.score, mm.bucket, mm.match_type, mm.priority, mm.intent, mm.ai_confidence, mm.ai_reason, mm.ad_score, mm.ad_label, mm.ad_signals,
   mm.keyword_text, mm.context_ok, mm.status, mm.pinned, mm.feedback, mm.tags, mm.occurrences, mm.created_at, mm.extra, mm.ai_rule_id, mm.keyword_id, mm.sender_id AS m_sender_id,
   m.text, m.tg_message_id, m.tg_chat_id, m.sender_username, m.sender_name, m.sent_at, m.lang,
   s.id AS source_id, s.title AS source_title, s.kind AS source_kind, s.username AS source_username,
@@ -20,7 +20,7 @@ export function toCard(r) {
   const links = telegramLinks({ chatId: r.tg_chat_id, kind: r.source_kind, username: r.source_username, messageId: r.tg_message_id, senderId: r.m_sender_id, senderUsername: r.sender_username });
   return {
     id: r.id, message_id: r.message_id, tg_message_id: r.tg_message_id, score: r.score, bucket: r.bucket, match_type: r.match_type,
-    priority: r.priority, intent: r.intent, ai_confidence: r.ai_confidence, ai_reason: r.ai_reason, keyword: r.keyword_text, context_ok: r.context_ok,
+    priority: r.priority, intent: r.intent, ai_confidence: r.ai_confidence, ai_reason: r.ai_reason, ad_score: r.ad_score, ad_label: r.ad_label, ad_signals: r.ad_signals ?? {}, ad_reason: r.extra?.ad_reason ?? null, keyword: r.keyword_text, context_ok: r.context_ok,
     status: r.status, pinned: r.pinned, feedback: r.feedback, saved: r.saved, tags: r.tags, occurrences: r.occurrences,
     created_at: r.created_at, sent_at: r.sent_at, text: r.text, lang: r.lang,
     sender: { id: r.m_sender_id, username: r.sender_username, name: r.sender_name },

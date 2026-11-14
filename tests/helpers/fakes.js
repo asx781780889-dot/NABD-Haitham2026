@@ -53,7 +53,8 @@ export async function startFakeServices() {
     if (st.ai.mode === 'rate') { res.writeHead(429, { 'retry-after': '0', 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'rate limited' } })); }
     const j = JSON.parse(raw); const system = j.messages[0].content; const user = j.messages.at(-1).content; st.ai.lastUser = user;
     let content;
-    if (system.includes('Telegram monitoring radar')) { st.ai.drafts++; content = JSON.stringify({ name: 'Graduation help', intent: 'Graduation Help', intent_description: 'People asking for help with graduation projects', language: 'ar', signals: ['احتاج مساعدة في مشروع التخرج', 'ابي احد يساعدني في مشروع التخرج', 'من يساعدني في مشروع التخرج', 'عندي مشروع تخرج', 'احتاج شخص يفهم في مشروع التخرج'], negative_signals: ['نقدم خدمات مشاريع التخرج'], min_score: 70, priority_hint: 'high', context_mode: 'none' }); }
+    if (system.includes('advertiser detection')) content = JSON.stringify({ role: /نقدم|نوفر|واتساب|خصم/.test(user) ? 'advertiser' : 'seeker', confidence: 90, reason: 'تصنيف وهمي للاختبار' });
+    else if (system.includes('Telegram monitoring radar')) { st.ai.drafts++; content = JSON.stringify({ name: 'Graduation help', intent: 'Graduation Help', intent_description: 'People asking for help with graduation projects', language: 'ar', signals: ['احتاج مساعدة في مشروع التخرج', 'ابي احد يساعدني في مشروع التخرج', 'من يساعدني في مشروع التخرج', 'عندي مشروع تخرج', 'احتاج شخص يفهم في مشروع التخرج'], negative_signals: ['نقدم خدمات مشاريع التخرج'], min_score: 70, priority_hint: 'high', context_mode: 'none' }); }
     else if (system.includes('improve a Telegram monitoring radar')) content = JSON.stringify({ new_signals: ['مين يقدر يساعدني بمشروع التخرج'], negative_signals: [], min_score_suggestion: 75, notes: 'ok' });
     else if (system.includes('{"ok":true}')) content = '{"ok":true}';
     else {

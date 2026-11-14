@@ -17,7 +17,7 @@ async function tryLock(client) {
 }
 
 export async function runCleanup({ dryRun = false, urgent = false } = {}) {
-  const s = await getSettings('database.'); const l = await getSettings('logs.');
+  const s = await getSettings('database.'); const l = await getSettings('logs.'); const ads = await getSettings('ads.behavior.');
   const out = { dry_run: dryRun, urgent, lock_acquired: false, capped: false };
   const softWhere = `m.deleted_at IS NULL AND m.state IN ('done','skipped','failed') AND m.created_at < now() - make_interval(days => $1) AND ${UNREFERENCED}`;
   const purgeWhere = `m.deleted_at IS NOT NULL AND m.deleted_at < now() - make_interval(days => $1) AND ${UNREFERENCED}`;
@@ -41,6 +41,7 @@ export async function runCleanup({ dryRun = false, urgent = false } = {}) {
     out.jobs_deleted = await batched(client, `DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE state IN ('completed','failed','cancelled') AND finished_at < now() - interval '30 days' ORDER BY id LIMIT ${BATCH})`, []);
     out.usage_deleted = await batched(client, `DELETE FROM api_usage WHERE id IN (SELECT id FROM api_usage WHERE created_at < now() - interval '90 days' ORDER BY id LIMIT ${BATCH})`, []);
     out.automation_runs_deleted = await batched(client, `DELETE FROM automation_runs WHERE id IN (SELECT id FROM automation_runs WHERE started_at < now() - interval '60 days' ORDER BY id LIMIT ${BATCH})`, []);
+    out.advertiser_statuses_decayed = (await client.query(`UPDATE sender_profiles SET status='unknown', ad_score=LEAST(ad_score,39), updated_at=now() WHERE status_source='auto' AND status <> 'unknown' AND (last_ad_at IS NULL OR last_ad_at < now() - make_interval(days => $1))`, [ads.decay_days ?? 14])).rowCount;
     out.workers_deleted = await batched(client, `DELETE FROM workers WHERE (name, instance_id) IN (SELECT name, instance_id FROM workers WHERE last_heartbeat < now() - interval '7 days' LIMIT ${BATCH})`, []);
     out.capped = Object.values(out).some((v) => typeof v === 'number' && v >= BATCH * MAX_BATCHES);
     if (urgent) out.mode = 'eligible-data-only; primary records and matches preserved';

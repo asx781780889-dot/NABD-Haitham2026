@@ -43,18 +43,18 @@ export async function persistCard(i) {
     const dup = await findDuplicate(c, i, cfg);
     if (dup) {
       const ins = await c.query('INSERT INTO match_occurrences (match_id, message_id, account_id, source_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING id', [dup.id, msg.id, msg.account_id, msg.source_id]);
-      if (ins.rowCount) await c.query('UPDATE message_matches SET occurrences = occurrences + 1, last_seen_at = now() WHERE id = $1', [dup.id]);
+      if (ins.rowCount) await c.query("UPDATE message_matches SET occurrences = occurrences + 1, last_seen_at = now(), ad_score = GREATEST(COALESCE(ad_score,0),$2), ad_label = CASE WHEN $3 = 'ad' OR ad_label = 'ad' THEN 'ad' WHEN $3 = 'suspect' OR ad_label = 'suspect' THEN 'suspect' ELSE COALESCE(ad_label,'clean') END, ad_signals = COALESCE(ad_signals,'{}'::jsonb) || $4::jsonb WHERE id = $1", [dup.id, card.adScore ?? 0, card.adLabel ?? 'clean', JSON.stringify(Object.fromEntries((card.adSignals ?? []).map((s) => [s.id, s.weight])))]);
       await done();
       await publish('match.update', { id: dup.id }, c);
       return { id: dup.id, created: false, duplicate: true };
     }
     const r = await c.query(
       `INSERT INTO message_matches (message_id, account_id, source_id, ai_rule_id, keyword_id, rule_id, match_type, score, priority, intent, ai_confidence, ai_reason,
-         keyword_text, context_ok, extra, tags, exact_hash, norm_hash, simhash, sh0, sh1, sh2, sh3, sender_id, chat_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING id`,
+         keyword_text, context_ok, extra, tags, exact_hash, norm_hash, simhash, sh0, sh1, sh2, sh3, sender_id, chat_id, ad_score, ad_label, ad_signals)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) RETURNING id`,
       [msg.id, msg.account_id, msg.source_id, card.aiRuleId ?? null, card.keywordId ?? null, card.ruleId ?? null, card.matchType, card.score, card.priority, card.intent ?? null,
         card.aiConfidence ?? null, card.aiReason ?? null, card.keywordText ?? null, card.contextOk ?? null, JSON.stringify(card.extra ?? {}), [...(card.tags ?? [])],
-        fp.exact, fp.norm, fp.simhash, ...fp.bands, msg.sender_id, msg.tg_chat_id],
+        fp.exact, fp.norm, fp.simhash, ...fp.bands, msg.sender_id, msg.tg_chat_id, card.adScore ?? null, card.adLabel ?? 'clean', JSON.stringify(Object.fromEntries((card.adSignals ?? []).map((s) => [s.id, s.weight])))],
     );
     const id = r.rows[0].id;
     await c.query('INSERT INTO match_occurrences (match_id, message_id, account_id, source_id) VALUES ($1,$2,$3,$4)', [id, msg.id, msg.account_id, msg.source_id]);

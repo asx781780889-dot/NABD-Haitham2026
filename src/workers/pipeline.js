@@ -16,12 +16,16 @@ import { notifyMatch } from '../services/notifier.js';
 import { saveMatch } from '../services/saved.js';
 import { fireTrigger } from '../services/automation.js';
 import { bump, bumpRadar, bumpKeyword } from '../services/stats.js';
-import { analyzeForRadar } from '../ai/analyzer.js';
+import { analyzeForRadar, classifyAd } from '../ai/analyzer.js';
 import { aiAvailable } from '../ai/manager.js';
+import { scoreAd } from '../engine/adscore.js';
+import { observe, getObserved, updateSenderProfile } from '../services/senders.js';
+import { TokenBucket } from '../lib/resilience.js';
 import { logger } from '../lib/logger.js';
 
 const log = logger('pipeline');
 const TYPE_AR = { exact: 'مطابق تمامًا', partial: 'جزئي', fuzzy: 'تقريبي', synonym: 'مرادف', semantic: 'دلالي', rule: 'قاعدة' };
+const adBucket = new TokenBucket({ ratePerSec: 20 / 60, burst: 20 });
 
 async function loadContext(messageId) {
   const row = await one(
@@ -57,6 +61,10 @@ export async function stageProcess(messageId) {
   else if (!ctx.an.tokens.length) reason = 'empty';
   else reason = await checkBlocked({ senderId: ctx.msg.sender_id, tgChatId: ctx.msg.tg_chat_id, analysis: ctx.an });
   if (reason) { await finish(ctx, 'skipped', reason); return { skipped: reason }; }
+  if (ctx.msg.sender_id != null && ctx.an.tokens.length >= 4) {
+    try { const fp = fingerprint(ctx.an); await observe({ messageId: ctx.msg.id, senderId: ctx.msg.sender_id, chatId: ctx.msg.tg_chat_id, sourceId: ctx.msg.source_id, normHash: fp.norm, simhash: fp.h, tokensCount: ctx.an.tokens.length }); }
+    catch (e) { log.warn('advertiser behavior degraded', { err: e.message }); }
+  }
   if (!(await enqueue(Q.keyword, 'keyword', { messageId }, { jobId: `k-${messageId}-${claimed.attempts}` }))) return stageKeyword(messageId); // degraded: no queue -> inline
   return { queued: 'keyword' };
 }
@@ -168,6 +176,22 @@ export async function decide(ctx, local, aiMap, { degraded }) {
   }
   const qualified = candidates.filter((c) => c.qualifies).sort((a, b) => b.score - a.score);
   let best = qualified[0] ?? null;
+  const adResult = scoreAd(an, msg.text, { lexicon: cfg.adLexicon, hasMedia: msg.has_media });
+  const behavior = getObserved(msg.id);
+  let adScore = Math.max(0, Math.min(100, Math.round(adResult.score * 0.65 + behavior.behaviorScore * 0.35)));
+  let adLabel = adScore >= 70 ? 'ad' : adScore >= 40 ? 'suspect' : 'clean';
+  let adReason = null;
+  if (best && adScore >= 30 && adScore <= 70 && await aiAvailable() && adBucket.tryTake()) {
+    try {
+      const examples = await many('SELECT text, label FROM ad_examples ORDER BY created_at DESC LIMIT 12');
+      const ai = await classifyAd({ text: msg.text, normHash: fingerprint(an).norm, sourceTitle: source.title, examples });
+      adReason = ai.reason;
+      if (ai.confidence >= 60 && ai.role === 'advertiser') { adScore = Math.max(adScore, ai.confidence); adLabel = 'ad'; }
+      if (ai.confidence >= 60 && ai.role === 'seeker') { adScore = Math.min(adScore, 100 - ai.confidence); adLabel = adScore >= 40 ? 'suspect' : 'clean'; }
+      adResult.signals.push({ id: 'ai_role', weight: ai.role === 'advertiser' ? ai.confidence : -ai.confidence, role: ai.role });
+    } catch (e) { adResult.signals.push({ id: 'ai_degraded', weight: 0 }); log.warn('ad classification degraded', { err: e.message }); }
+  }
+  if (msg.sender_id != null) await updateSenderProfile({ senderId: msg.sender_id, username: msg.sender_username, displayName: msg.sender_name, adScore, isAd: adLabel === 'ad', behavior }).catch((e) => log.warn('sender profile degraded', { err: e.message }));
 
   const prio = async (c) => {
     const sens = cfg.sensitiveWords.filter((w) => quickMatch(an, w, 'contains').ok).length + (c.sensitive ? 1 : 0);
@@ -204,7 +228,8 @@ export async function decide(ctx, local, aiMap, { degraded }) {
     card: {
       aiRuleId: best.aiRuleId, keywordId: best.keywordId, ruleId: d.ruleIds[0] ?? null, matchType: best.matchType, score: best.score, priority, intent: best.intent, aiConfidence: best.aiConfidence,
       aiReason: best.aiReason, keywordText: best.keywordText, contextOk: best.contextOk, tags: d.tags,
-      extra: { candidates: qualified.slice(0, 5).map((c) => ({ radar: c.aiRuleId, kw: c.keywordId, type: c.matchType, score: c.score, intent: c.intent })), factors: pr?.factors ?? [], ai_degraded: degraded, force_channels: [...d.forceChannels], rule_ids: d.ruleIds, entities: best.entities },
+      extra: { candidates: qualified.slice(0, 5).map((c) => ({ radar: c.aiRuleId, kw: c.keywordId, type: c.matchType, score: c.score, intent: c.intent })), factors: pr?.factors ?? [], ai_degraded: degraded, force_channels: [...d.forceChannels], rule_ids: d.ruleIds, entities: best.entities, ad_reason: adReason },
+      adScore, adLabel, adSignals: adResult.signals,
     },
   });
   bump({ accountId: msg.account_id, sourceId: msg.source_id, messages: 1, ...(res.created ? { matches: 1, high: priorityAtLeast(priority, 'high') ? 1 : 0 } : {}), ...(res.duplicate ? { duplicates: 1 } : {}) });

@@ -35,6 +35,7 @@ export function matchWhere(q, { includeIgnored = false } = {}) {
   if (q.pinned === 'true') w.raw('mm.pinned');
   if (q.saved === 'true') w.raw('EXISTS (SELECT 1 FROM saved_results sr WHERE sr.match_id = mm.id AND sr.deleted_at IS NULL)');
   if (q.feedback) w.add('mm.feedback = $#', String(q.feedback));
+  if (q.ad_label) w.add('mm.ad_label = ANY($#::text[])', csv(q.ad_label).filter((x) => ['clean', 'suspect', 'ad'].includes(x)));
   if (q.after_id) w.add('mm.id > $#', Number(q.after_id));
   return w;
 }

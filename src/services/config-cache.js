@@ -9,7 +9,7 @@ export const invalidateCompiled = () => { cache = null; };
 
 export async function getCompiled() {
   if (cache && Date.now() - at < 10000) return cache;
-  const [kwRows, varRows, radarRows, ruleRows, custom, sensitive, thresholds] = await Promise.all([
+  const [kwRows, varRows, radarRows, ruleRows, custom, sensitive, thresholds, adLexicon] = await Promise.all([
     many('SELECT * FROM keywords WHERE enabled AND deleted_at IS NULL'),
     many('SELECT v.* FROM keyword_variants v JOIN keywords k ON k.id = v.keyword_id WHERE k.enabled AND k.deleted_at IS NULL'),
     many("SELECT * FROM ai_rules WHERE status = 'active' AND deleted_at IS NULL ORDER BY id"),
@@ -17,6 +17,7 @@ export async function getCompiled() {
     getSetting('keywords.custom_synonyms'),
     getSetting('priority.sensitive_words'),
     Promise.all(['medium', 'high', 'critical'].map((k) => getSetting(`priority.${k}`))),
+    many('SELECT phrase, norm_phrase, kind, weight, enabled FROM ad_lexicon WHERE enabled').catch(() => []),
   ]);
   const canon = buildCanon([...DEFAULT_SYNONYM_GROUPS, ...custom]);
   const byKw = new Map();
@@ -29,7 +30,7 @@ export async function getCompiled() {
   }));
   const [medium, high, critical] = thresholds;
   const rulesNeedAi = ruleRows.some((r) => /"type":"(confidence|intent)"/.test(JSON.stringify(r.conditions)));
-  cache = { canon, keywords, radars, rules: ruleRows, rulesNeedAi, sensitiveWords: sensitive.map(String).filter(Boolean), thresholds: { medium, high, critical } };
+  cache = { canon, keywords, radars, rules: ruleRows, rulesNeedAi, sensitiveWords: sensitive.map(String).filter(Boolean), thresholds: { medium, high, critical }, adLexicon };
   at = Date.now();
   return cache;
 }

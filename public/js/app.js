@@ -9,14 +9,14 @@ import { browserNotify, beep, isMuted, setMuted } from './lib/notify.js';
 const NAV = [
   ['Operations', [['/', 'Dashboard', 'home'], ['/feed', 'Live Feed', 'activity'], ['/accounts', 'Telegram Accounts', 'users'], ['/sources', 'Sources', 'layers']]],
   ['Intelligence', [['/radar', 'Smart Radar', 'radar'], ['/keywords', 'Keywords', 'tag'], ['/rules', 'Rules', 'sliders'], ['/automations', 'Automation', 'zap'], ['/ai', 'AI Settings', 'cpu', 'operator']]],
-  ['Insights', [['/search', 'Search', 'search'], ['/saved', 'Saved', 'bookmark'], ['/analytics', 'Analytics', 'chart'], ['/reports', 'Reports', 'file'], ['/alerts', 'Alerts', 'bell'], ['/blocks', 'Blocks', 'ban']]],
+  ['Insights', [['/search', 'Search', 'search'], ['/saved', 'Saved', 'bookmark'], ['/advertisers', 'Advertisers', 'megaphone'], ['/analytics', 'Analytics', 'chart'], ['/reports', 'Reports', 'file'], ['/alerts', 'Alerts', 'bell'], ['/blocks', 'Blocks', 'ban']]],
   ['Administration', [['/tasks', 'Tasks', 'list'], ['/system', 'System', 'server'], ['/logs', 'Logs', 'terminal', 'operator'], ['/settings', 'Settings', 'settings']]],
 ];
 const PAGES = {
   '/': () => import('./pages/dashboard.js'), '/feed': () => import('./pages/feed.js'), '/accounts': () => import('./pages/accounts.js'), '/sources': () => import('./pages/sources.js'),
   '/radar': () => import('./pages/radar.js'), '/keywords': () => import('./pages/keywords.js'), '/rules': () => import('./pages/rules.js'), '/automations': () => import('./pages/automations.js'),
   '/ai': () => import('./pages/ai.js'), '/search': () => import('./pages/search.js'), '/saved': () => import('./pages/saved.js'), '/analytics': () => import('./pages/analytics.js'),
-  '/reports': () => import('./pages/reports.js'), '/alerts': () => import('./pages/alerts.js'), '/blocks': () => import('./pages/blocks.js'), '/tasks': () => import('./pages/tasks.js'),
+  '/reports': () => import('./pages/reports.js'), '/alerts': () => import('./pages/alerts.js'), '/blocks': () => import('./pages/blocks.js'), '/advertisers': () => import('./pages/advertisers.js'), '/tasks': () => import('./pages/tasks.js'),
   '/system': () => import('./pages/system.js'), '/logs': () => import('./pages/logs.js'), '/settings': () => import('./pages/settings.js'), '/setup': () => import('./pages/setup.js'),
 };
 const root = document.getElementById('app');
