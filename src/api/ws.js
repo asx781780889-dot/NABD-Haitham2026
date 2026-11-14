@@ -39,33 +39,16 @@ export function attachWebSocket(server) {
     try {
       const cards = await hydrateCards(batch.map(([id]) => id));
       const { users, sources } = await blockedSets(); const kinds = new Map(batch);
-      const feedLabels = new Map((await many(`SELECT mm.id, COALESCE(ic.reviewed_label, ic.label) AS label FROM message_matches mm
-        LEFT JOIN message_intent_classifications ic ON ic.message_id = mm.message_id WHERE mm.id = ANY($1::bigint[])`, [cards.map((c) => c.id)])).map((r) => [r.id, r.label]));
       for (const c of cards) {
         if ((c.sender.id != null && users.has(c.sender.id)) || sources.has(c.source.tg_chat_id) || c.status === 'ignored') continue;
         const plan = await channelPlan(c.priority, new Set(c.force_channels));
-        const ui = { browser: plan.browser, sound: plan.sound };
-        broadcast({ t: kinds.get(c.id), card: c, ui });
-        if (feedLabels.get(c.id) === 'NEED_HELP') broadcast({ t: kinds.get(c.id) === 'match.new' ? 'feed.match.new' : 'feed.match.update', card: c, ui });
+        broadcast({ t: kinds.get(c.id), card: c, ui: { browser: plan.browser, sound: plan.sound } });
       }
-      if (cards.length) broadcast({ t: 'feed.stats.update' });
     } catch (e) { log.warn('match broadcast failed', { err: e.message }); }
-  }
-  async function broadcastFeedCard(id) {
-    const [card] = await hydrateCards([id]); if (!card || card.status === 'ignored') return;
-    const { users, sources } = await blockedSets();
-    if ((card.sender.id != null && users.has(card.sender.id)) || sources.has(card.source.tg_chat_id)) return;
-    const plan = await channelPlan(card.priority, new Set(card.force_channels));
-    broadcast({ t: 'feed.match.new', card, ui: { browser: plan.browser, sound: plan.sound } });
   }
   const sub = subscribe(async (m) => {
     try {
       if (m.t === 'match.new' || m.t === 'match.update') { pending.set(m.id, m.t === 'match.new' || pending.get(m.id) === 'match.new' ? 'match.new' : 'match.update'); flushTimer ??= setTimeout(flushMatches, 120); }
-      else if (m.t === 'feed.reviewed') {
-        if (m.matchId && m.label === 'NEED_HELP') await broadcastFeedCard(m.matchId);
-        else if (m.matchId) broadcast({ t: 'feed.match.remove', id: m.matchId });
-        broadcast({ t: 'feed.stats.update' });
-      }
       else if (m.t === 'alert.new') { const a = await one('SELECT id, kind, severity, title, body, match_id, created_at FROM notifications WHERE id = $1', [m.id]); if (a) broadcast({ t: 'alert.new', alert: a }); }
       else if (m.t === 'account.status') { const a = await one(`SELECT ${SAFE_ACCOUNT_COLUMNS} FROM telegram_accounts a WHERE a.id = $1`, [m.id]); if (a) broadcast({ t: 'account.status', account: a }); }
       else if (m.t === 'worker.status' || m.t === 'job.update' || m.t === 'system.status') broadcast({ t: m.t, id: m.id ?? null });

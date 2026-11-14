@@ -10,7 +10,7 @@ Roles: `viewer` < `operator` < `admin`. Routes marked **+ password** also requir
 - **Pagination**: `?page=1&limit=50` → `{ "data": [...], "meta": { "total", "page", "limit", "pages" } }` (max limit 100-200 depending on the endpoint).
 - **Match filters** (`/api/matches`, `/api/search`, exports, reports): `priority=high,critical`, `min_score=70`, `buckets=70,80,90,100` (bucket N = scores in (N-10, N]), `account_id`, `source_id`, `source`, `intent`, `rule_id`, `keyword`, `user`, `user_id`, `q`, `from`, `to` (ISO dates), `status`, `pinned`, `saved`, `feedback`, `sort=created|score|priority`. Arabic text search ignores alef/ya/ta-marbuta/diacritic variants.
 - **Exports**: `/api/export/{matches|saved|report|audit}?format=csv|json|xlsx|pdf` (`pdf` returns a print-ready page: use the browser's *Save as PDF*, which shapes Arabic correctly).
-- **Real time**: `GET /ws` (WebSocket, same cookie). Server events: `match.new` / `match.update` (`card`, `ui:{browser,sound}`), `feed.match.new` / `feed.match.update` (same payload, only effective `NEED_HELP`), `feed.match.remove`, `feed.stats.update`, `alert.new`, `account.status`, `worker.status`, `job.update`, `system.status`, `stats.tick`. Blocked users/groups are filtered server-side before broadcast.
+- **Real time**: `GET /ws` (WebSocket, same cookie). Server events: `match.new` / `match.update` (`card`, `ui:{browser,sound}`), `alert.new`, `account.status`, `worker.status`, `job.update`, `system.status`, `stats.tick`. Blocked users/groups are filtered server-side before broadcast.
 - **Health**: `GET /health` (liveness), `GET /ready` (200 when PostgreSQL is reachable; body says `ready` or `degraded` when Redis/workers are down), `GET /metrics` (Prometheus text; loopback, a signed-in user, or `Authorization: Bearer $METRICS_TOKEN`).
 
 ## Endpoints (128 routes)
@@ -70,10 +70,6 @@ Roles: `viewer` < `operator` < `admin`. Routes marked **+ password** also requir
 | POST | `/api/keywords/:id/variants` | operator |
 | POST | `/api/keywords/test` | operator |
 | DELETE | `/api/keywords/variants/:id` | operator |
-| GET | `/api/feed/matches` | viewer |
-| GET | `/api/feed/stats` | viewer |
-| GET | `/api/feed/review` | viewer |
-| PATCH | `/api/feed/review/:id` | operator |
 | GET | `/api/matches` | viewer |
 | GET | `/api/matches/:id` | viewer |
 | DELETE | `/api/matches/:id` | operator |
@@ -97,8 +93,8 @@ Roles: `viewer` < `operator` < `admin`. Routes marked **+ password** also requir
 | GET | `/api/reports` | viewer |
 | POST | `/api/reports` | operator |
 | DELETE | `/api/reports/:id` | operator |
-| POST | `/api/export/...` | viewer |
-| GET | `/api/matches` | viewer |
+| GET | `/api/reports/run` | viewer |
+| GET | `/api/rules` | viewer |
 | POST | `/api/rules` | operator |
 | PATCH | `/api/rules/:id` | operator |
 | DELETE | `/api/rules/:id` | operator |
