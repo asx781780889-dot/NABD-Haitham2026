@@ -5,7 +5,7 @@ import { pageHead, btn, iconBtn, card, tabs, table, form, modal, toast, showErro
 import { settingsEditor } from '../lib/settingsform.js';
 import { applyPrefs } from '../app.js';
 
-const GROUPS = [['general', 'General'], ['appearance', 'Appearance'], ['telegram', 'Telegram'], ['notifications', 'Notifications'], ['ai', 'AI Settings'], ['security', 'Security'], ['database', 'Database'], ['workers', 'Workers'], ['queue', 'Queue'], ['radar', 'Smart Radar'], ['keywords', 'Keywords'], ['backup', 'Backup'], ['logs', 'Logs']];
+const GROUPS = [['general', 'General'], ['appearance', 'Appearance'], ['telegram', 'Telegram'], ['notifications', 'Notifications'], ['ai', 'AI Settings'], ['security', 'Security'], ['database', 'Database'], ['workers', 'Workers'], ['queue', 'Queue'], ['radar', 'Smart Radar'], ['feed', 'Smart Message Intent'], ['keywords', 'Keywords'], ['backup', 'Backup'], ['logs', 'Logs']];
 const ROLES = [['admin', 'Administrator'], ['operator', 'Operator'], ['viewer', 'Viewer']];
 
 export default async function settings(ctx) {
