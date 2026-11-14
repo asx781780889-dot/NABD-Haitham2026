@@ -19,6 +19,7 @@ import { bump, bumpRadar, bumpKeyword } from '../services/stats.js';
 import { analyzeForRadar } from '../ai/analyzer.js';
 import { aiAvailable } from '../ai/manager.js';
 import { logger } from '../lib/logger.js';
+import { classifyFeedCandidate } from '../services/message-intent.js';
 
 const log = logger('pipeline');
 const TYPE_AR = { exact: 'مطابق تمامًا', partial: 'جزئي', fuzzy: 'تقريبي', synonym: 'مرادف', semantic: 'دلالي', rule: 'قاعدة' };
@@ -198,13 +199,16 @@ export async function decide(ctx, local, aiMap, { degraded }) {
     return { matched: false };
   }
 
+  // Classify only messages already selected as card candidates; keep generic matching and notifications intact.
+  const feedIntent = await classifyFeedCandidate({ messageId: msg.id, text: msg.text, sourceTitle: source.title });
+
   const priority = d.priority ?? 'low';
   const res = await persistCard({
     msg, an, fp: fingerprint(an),
     card: {
       aiRuleId: best.aiRuleId, keywordId: best.keywordId, ruleId: d.ruleIds[0] ?? null, matchType: best.matchType, score: best.score, priority, intent: best.intent, aiConfidence: best.aiConfidence,
       aiReason: best.aiReason, keywordText: best.keywordText, contextOk: best.contextOk, tags: d.tags,
-      extra: { candidates: qualified.slice(0, 5).map((c) => ({ radar: c.aiRuleId, kw: c.keywordId, type: c.matchType, score: c.score, intent: c.intent })), factors: pr?.factors ?? [], ai_degraded: degraded, force_channels: [...d.forceChannels], rule_ids: d.ruleIds, entities: best.entities },
+      extra: { candidates: qualified.slice(0, 5).map((c) => ({ radar: c.aiRuleId, kw: c.keywordId, type: c.matchType, score: c.score, intent: c.intent })), factors: pr?.factors ?? [], ai_degraded: degraded, force_channels: [...d.forceChannels], rule_ids: d.ruleIds, entities: best.entities, feed_intent: { label: feedIntent.reviewed_label ?? feedIntent.label, confidence: feedIntent.confidence } },
     },
   });
   bump({ accountId: msg.account_id, sourceId: msg.source_id, messages: 1, ...(res.created ? { matches: 1, high: priorityAtLeast(priority, 'high') ? 1 : 0 } : {}), ...(res.duplicate ? { duplicates: 1 } : {}) });

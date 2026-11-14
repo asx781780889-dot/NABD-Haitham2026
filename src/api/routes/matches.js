@@ -11,6 +11,7 @@ import { BLOCK_FILTER_SQL, blockUser, blockSource, blockKeyword, invalidateBlock
 import { publish } from '../../lib/bus.js';
 import { sendExport, MAX_EXPORT_ROWS } from '../../services/export.js';
 import { normalizeText } from '../../engine/normalize.js';
+import { reviewFeedClassification } from '../../services/message-intent.js';
 
 const r = express.Router();
 const PRIS = ['low', 'medium', 'high', 'critical'];
@@ -53,6 +54,70 @@ async function listMatches(q, p) {
   return { cards: rows.map(toCard), total: total.n };
 }
 const loadCard = async (id) => { const row = await one(`${CARD_SELECT} WHERE mm.id = $1 AND mm.deleted_at IS NULL`, [id]); if (!row) throw new AppError('NOT_FOUND', { status: 404 }); return toCard(row); };
+
+function feedMatchWhere(q) {
+  const w = matchWhere(q);
+  w.raw(`EXISTS (SELECT 1 FROM message_intent_classifications fic WHERE fic.message_id = mm.message_id AND COALESCE(fic.reviewed_label, fic.label) = 'NEED_HELP')`);
+  return w;
+}
+r.get('/feed/matches', need('viewer'), h(async (req, res) => {
+  const p = paging(req.query, { max: 100, def: 30 }); const w = feedMatchWhere(req.query);
+  const [rows, total] = await Promise.all([
+    many(`${CARD_SELECT} WHERE ${w.sql} ORDER BY ${req.query.pinned_first === 'true' ? 'mm.pinned DESC, ' : ''}${ORDER[req.query.sort] ?? ORDER.created} LIMIT ${p.limit} OFFSET ${p.offset}`, w.v),
+    one(`SELECT count(*)::int AS n ${FROM_COUNT} WHERE ${w.sql}`, w.v),
+  ]);
+  res.json({ data: rows.map(toCard), meta: pageMeta(total.n, p) });
+}));
+
+r.get('/feed/stats', need('viewer'), h(async (req, res) => {
+  const range = ({ '7d': "now() - interval '7 days'", '30d': "now() - interval '30 days'" })[req.query.range] ?? "now() - interval '24 hours'";
+  const [received, c, displayed] = await Promise.all([
+    one(`SELECT count(*)::int AS n FROM messages WHERE sent_at >= ${range} AND deleted_at IS NULL`),
+    one(`SELECT count(*)::int AS assessed,
+      count(*) FILTER (WHERE COALESCE(ic.reviewed_label, ic.label) = 'NEED_HELP')::int AS need_help,
+      count(*) FILTER (WHERE COALESCE(ic.reviewed_label, ic.label) = 'ADVERTISEMENT')::int AS advertisements,
+      count(*) FILTER (WHERE COALESCE(ic.reviewed_label, ic.label) = 'UNCERTAIN')::int AS uncertain,
+      count(*) FILTER (WHERE ic.label = 'UNCERTAIN' AND ic.reviewed_at IS NULL)::int AS awaiting_review,
+      count(*) FILTER (WHERE ic.reviewed_at IS NOT NULL)::int AS reviewed,
+      COALESCE((100.0 * count(*) FILTER (WHERE ic.reviewed_at IS NOT NULL AND ic.reviewed_label = ic.label) / NULLIF(count(*) FILTER (WHERE ic.reviewed_at IS NOT NULL), 0))::numeric, 0)::float AS reviewed_accuracy
+      FROM message_intent_classifications ic JOIN messages m ON m.id = ic.message_id
+      WHERE m.sent_at >= ${range} AND m.deleted_at IS NULL`),
+    one(`SELECT count(*)::int AS n FROM message_matches mm JOIN messages m ON m.id = mm.message_id
+      WHERE mm.created_at >= ${range} AND mm.deleted_at IS NULL AND mm.status <> 'ignored' AND ${BLOCK_FILTER_SQL}
+        AND EXISTS (SELECT 1 FROM message_intent_classifications ic WHERE ic.message_id = mm.message_id AND COALESCE(ic.reviewed_label, ic.label) = 'NEED_HELP')`),
+  ]);
+  res.json({ range: req.query.range === '7d' || req.query.range === '30d' ? req.query.range : '24h', messages_received: received.n, messages_displayed: displayed.n, ...c });
+}));
+
+r.get('/feed/review', need('viewer'), h(async (req, res) => {
+  const p = paging(req.query, { max: 100, def: 30 }); const w = where(
+    "ic.label = 'UNCERTAIN'", 'ic.reviewed_at IS NULL', 'm.deleted_at IS NULL',
+    'NOT EXISTS (SELECT 1 FROM blocked_users bu WHERE bu.tg_user_id = m.sender_id)',
+    'NOT EXISTS (SELECT 1 FROM blocked_sources bs WHERE bs.tg_chat_id = m.tg_chat_id)',
+  );
+  if (req.query.q) nlike(w, ['m.text', 'm.sender_username', 'm.sender_name', 's.title'], req.query.q);
+  const [rows, total] = await Promise.all([
+    many(`SELECT ic.id AS classification_id, ic.message_id, ic.label, ic.confidence, ic.reason, ic.method, ic.provider, ic.model, ic.created_at,
+      m.text, m.sender_id, m.sender_username, m.sender_name, m.sent_at, s.title AS source_title, mm.id AS match_id
+      FROM message_intent_classifications ic JOIN messages m ON m.id = ic.message_id
+      JOIN telegram_sources s ON s.id = m.source_id LEFT JOIN message_matches mm ON mm.message_id = m.id AND mm.deleted_at IS NULL
+      WHERE ${w.sql} ORDER BY ic.created_at DESC LIMIT ${p.limit} OFFSET ${p.offset}`, w.v),
+    one(`SELECT count(*)::int AS n FROM message_intent_classifications ic JOIN messages m ON m.id = ic.message_id JOIN telegram_sources s ON s.id = m.source_id WHERE ${w.sql}`, w.v),
+  ]);
+  res.json({ data: rows, meta: pageMeta(total.n, p) });
+}));
+
+r.patch('/feed/review/:id', need('operator'), h(async (req, res) => {
+  const id = idParam(req); const b = z.object({ label: z.enum(['NEED_HELP', 'ADVERTISEMENT', 'UNCERTAIN']) }).parse(req.body);
+  const before = await one(`SELECT ic.message_id, ic.label FROM message_intent_classifications ic WHERE ic.id = $1 AND ic.reviewed_at IS NULL`, [id]);
+  if (!before) throw new AppError('CONFLICT', { status: 409, message: 'classification already reviewed or missing' });
+  const reviewed = await reviewFeedClassification(id, { label: b.label, userId: req.user.id });
+  if (!reviewed) throw new AppError('CONFLICT', { status: 409, message: 'classification already reviewed' });
+  const card = await one('SELECT id FROM message_matches WHERE message_id = $1 AND deleted_at IS NULL', [before.message_id]);
+  await req.audit('FEED_CLASSIFICATION_REVIEWED', { entity: 'message', entityId: before.message_id, details: { from: before.label, to: b.label } });
+  await publish('feed.reviewed', { messageId: before.message_id, matchId: card?.id ?? null, label: b.label });
+  res.json({ ok: true, label: b.label, match_id: card?.id ?? null });
+}));
 
 r.get('/matches', need('viewer'), h(async (req, res) => {
   const p = paging(req.query, { max: 100, def: 30 }); const { cards, total } = await listMatches(req.query, p);
