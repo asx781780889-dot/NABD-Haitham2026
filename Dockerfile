@@ -1,6 +1,8 @@
 # NABD AI backend / worker image (the same image runs both: `node src/server.js` and `node src/worker.js`).
-FROM node:22-alpine
-RUN apk add --no-cache postgresql16-client tini
+# Match pg_dump with the production PostgreSQL 18 server; PostgreSQL 16 clients reject it.
+FROM node:22-alpine3.24
+RUN apk add --no-cache postgresql18-client tini \
+    && pg_dump --version | grep -q 'PostgreSQL) 18\.'
 WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev
