@@ -15,7 +15,7 @@ export async function observe({ messageId, senderId, chatId, sourceId, normHash,
   if (!history) { history = (fallback.get(senderId) ?? []).filter((x) => now - x.t < windowHours * 3600000); history.push(item); fallback.set(senderId, history.slice(-30)); prune(); }
   const matches = history.filter((x) => x.n === normHash || (x.h && simhash?.hi != null && hamming(x.h, simhash) <= 3));
   const repeat = matches.length; const groups = new Set(history.map((x) => x.c)).size;
-  const burst = history.filter((x) => now - x.t < 600000).length >= 3 && new Set(history.filter((x) => now - x.t < 600000).map((x) => x.c)).size >= 2);
+  const burst = history.filter((x) => now - x.t < 600000).length >= 3 && new Set(history.filter((x) => now - x.t < 600000).map((x) => x.c)).size >= 2;
   const seven = await one(`SELECT count(*)::int AS n FROM message_matches WHERE sender_id = $1 AND created_at > now() - interval '7 days' AND deleted_at IS NULL`, [senderId]).catch(() => ({ n: 0 }));
   const behaviorScore = Math.max(0, Math.min(100, repeat >= 3 ? 60 : repeat === 2 ? 45 : repeat === 1 ? 30 : 0) + (groups >= 3 ? 40 : groups >= 2 ? 25 : 0) + (burst ? 15 : 0) + Math.min(25, 5 * (seven?.n ?? 0)));
   const out = { behaviorScore, repeat, groups, burst, history: seven?.n ?? 0, senderId, sourceId, rulesScore }; results.set(Number(messageId), out); if (results.size > 10000) results.delete(results.keys().next().value); return out;
