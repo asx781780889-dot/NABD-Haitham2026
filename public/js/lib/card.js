@@ -53,7 +53,7 @@ export function matchCard(c, { onChange, onRemove, fresh = false, compact = fals
       op && h('span', { class: 'end row tight' },
         tip('up', t('Correct match'), act(() => post(`/matches/${c.id}/feedback`, { value: 'correct' })), c.feedback === 'correct' ? 'on' : ''),
         tip('dn', t('Incorrect match'), act(() => post(`/matches/${c.id}/feedback`, { value: 'incorrect' })), c.feedback === 'incorrect' ? 'on' : ''),
-        op && tip('megaphone', t('Advertiser'), act(() => post('/ads/feedback', { text: c.text ?? '', label: 'ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'ad' ? 'on' : ''),
-        op && tip('user', t('Not an advertiser'), act(() => post('/ads/feedback', { text: c.text ?? '', label: 'not_ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'clean' ? 'on' : ''))));
+        op && tip('megaphone', t('Advertiser'), act(() => post('/ads/feedback', { text: (c.text ?? '').slice(0, 1000), label: 'ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'ad' ? 'on' : ''),
+        op && tip('user', t('Not an advertiser'), act(() => post('/ads/feedback', { text: (c.text ?? '').slice(0, 1000), label: 'not_ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'clean' ? 'on' : ''))));
   return el;
 }
