@@ -1,5 +1,5 @@
 // Multi-channel notifications. Dashboard rows are written immediately; Telegram/email go through the queue (idempotent).
-import { one, query } from '../lib/db.js';
+import { one, query, tx } from '../lib/db.js';
 import { getSetting } from '../lib/settings.js';
 import { publish } from '../lib/bus.js';
 import { enqueue, Q } from '../lib/queue.js';
@@ -8,6 +8,7 @@ import { CHANNELS } from '../engine/conditions.js';
 import { logger } from '../lib/logger.js';
 import { AppError } from '../lib/errors.js';
 import { getTelegramManager } from '../telegram/registry.js';
+import { BLOCK_FILTER_SQL } from './blocks.js';
 
 const log = logger('notifier');
 const SEV = { low: 'low', medium: 'medium', high: 'high', critical: 'critical' };
@@ -35,13 +36,12 @@ export function formatCardText(card, lang = 'ar') {
   return lines.join('\n');
 }
 
-async function insertRow({ channel, kind, severity, title, body, matchId = null, payload = {}, dedupeKey = null, status = 'pending' }) {
-  return one(
-    `INSERT INTO notifications (kind, severity, channel, title, body, match_id, payload, dedupe_key, status, sent_at)
+async function insertRow({ channel, kind, severity, title, body, matchId = null, payload = {}, dedupeKey = null, status = 'pending' }, client = null) {
+  const sql = `INSERT INTO notifications (kind, severity, channel, title, body, match_id, payload, dedupe_key, status, sent_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $9 = 'sent' THEN now() END)
-     ON CONFLICT (dedupe_key, channel) DO NOTHING RETURNING id`,
-    [kind, severity, channel, title, body, matchId, JSON.stringify(payload), dedupeKey, status],
-  );
+     ON CONFLICT (dedupe_key, channel) DO NOTHING RETURNING id`;
+  const values = [kind, severity, channel, title, body, matchId, JSON.stringify(payload), dedupeKey, status];
+  return client ? (await client.query(sql, values)).rows[0] : one(sql, values);
 }
 
 /** Creates the notification rows for a freshly created card. Returns the channel plan used. */
@@ -50,15 +50,25 @@ export async function notifyMatch(card, forced = new Set(), { onlyForced = false
   const plan = onlyForced ? Object.fromEntries(CHANNELS.map((c) => [c, forced.has(c)])) : await channelPlan(card.priority, forced);
   const title = `${card.priority.toUpperCase()} ${Math.round(card.score)}% — ${card.intent ?? card.keyword ?? 'match'}`;
   const body = formatCardText(card, lang);
-  if (plan.dashboard) {
-    const r = await insertRow({ channel: 'dashboard', kind: 'match', severity: SEV[card.priority], title, body, matchId: card.id, dedupeKey: `match:${card.id}`, status: 'sent', payload: { priority: card.priority } });
-    if (r) await publish('alert.new', { id: r.id });
-  }
-  for (const ch of ['telegram', 'email']) {
-    if (!plan[ch]) continue;
-    const r = await insertRow({ channel: ch, kind: 'match', severity: SEV[card.priority], title, body, matchId: card.id, dedupeKey: `match:${card.id}`, payload: { priority: card.priority } });
-    if (r) await enqueue(Q.notify, 'send', { id: r.id }, { jobId: `n-${r.id}` });
-  }
+  const inserted = await tx(async (client) => {
+    const visible = await client.query(
+      `SELECT 1 FROM message_matches mm WHERE mm.id = $1 AND mm.deleted_at IS NULL AND mm.status <> 'ignored' AND ${BLOCK_FILTER_SQL} FOR NO KEY UPDATE OF mm`, [card.id]);
+    if (!visible.rowCount) return null;
+    let alertId = null; const queuedIds = [];
+    if (plan.dashboard) {
+      const r = await insertRow({ channel: 'dashboard', kind: 'match', severity: SEV[card.priority], title, body, matchId: card.id, dedupeKey: `match:${card.id}`, status: 'sent', payload: { priority: card.priority } }, client);
+      if (r) alertId = r.id;
+    }
+    for (const ch of ['telegram', 'email']) {
+      if (!plan[ch]) continue;
+      const r = await insertRow({ channel: ch, kind: 'match', severity: SEV[card.priority], title, body, matchId: card.id, dedupeKey: `match:${card.id}`, payload: { priority: card.priority } }, client);
+      if (r) queuedIds.push(r.id);
+    }
+    return { alertId, queuedIds };
+  });
+  if (!inserted) return null;
+  if (inserted.alertId) await publish('alert.new', { id: inserted.alertId });
+  for (const id of inserted.queuedIds) await enqueue(Q.notify, 'send', { id }, { jobId: `n-${id}` });
   return plan;
 }
 
@@ -99,6 +109,13 @@ async function sendEmail(n) {
 export async function sendNotification(id, { final = false } = {}) {
   const n = await one('SELECT * FROM notifications WHERE id = $1', [id]);
   if (!n || n.status === 'sent' || n.status === 'read') return 'skipped';
+  if (n.match_id != null) {
+    const visible = await one(`SELECT 1 FROM message_matches mm WHERE mm.id = $1 AND mm.deleted_at IS NULL AND mm.status <> 'ignored' AND ${BLOCK_FILTER_SQL}`, [n.match_id]);
+    if (!visible) {
+      await query("UPDATE notifications SET status = 'read', read_at = now(), error = 'suppressed: match blocked' WHERE id = $1", [id]);
+      return 'skipped';
+    }
+  }
   try {
     if (n.channel === 'telegram') await sendTelegram(n); else if (n.channel === 'email') await sendEmail(n); else return 'skipped';
     await query("UPDATE notifications SET status = 'sent', sent_at = now(), attempts = attempts + 1, error = NULL WHERE id = $1", [id]);

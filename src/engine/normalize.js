@@ -1,4 +1,5 @@
 // Arabic/Latin text normalisation, light stemming and dialect canonicalisation used by every matcher.
+import { createHash } from 'node:crypto';
 const DIACRITICS = /[\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g; // tashkeel, quranic marks, tatweel
 const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u00AD]/g;
 const CHAR_MAP = { 'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ٱ': 'ا', 'ى': 'ي', 'ة': 'ه', 'ؤ': 'و', 'ئ': 'ي', 'ک': 'ك', 'ی': 'ي', 'ې': 'ي', 'ھ': 'ه', 'ڤ': 'ف', 'پ': 'ب', 'چ': 'ج', 'گ': 'ك', 'ژ': 'ز' };
@@ -15,6 +16,11 @@ export function normalizeText(input) {
   s = s.replace(/(\p{L})\1{2,}/gu, '$1'); // elongation (3+ repeats never occur in real words): "مساااعدة" -> "مساعدة"
   return s.replace(/\s+/g, ' ').trim();
 }
+
+/** Stable content key; preserve symbol-only messages rather than mapping all of them to an empty key. */
+export const normalizeAdText = (input) => normalizeText(input)
+  || String(input ?? '').normalize('NFKC').replace(INVISIBLE, '').toLowerCase().replace(/\s+/g, ' ').trim();
+export const adFingerprint = (input) => createHash('sha256').update(normalizeAdText(input)).digest('hex');
 
 export function stem(tok) {
   if (tok.length > 3 && AR.test(tok)) {

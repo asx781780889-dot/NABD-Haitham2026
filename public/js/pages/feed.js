@@ -54,5 +54,6 @@ export default async function feed(ctx) {
   await load();
   ctx.onLeave(ws.on('match.new', (m) => { const c = m.card; if (!passes(c) || els.has(c.id)) return; st.afterId = 0; if (st.paused) { st.buffer.push(c); paint(); } else { list.querySelector('.empty')?.remove(); insert(c, true, true); } }));
   ctx.onLeave(ws.on('match.update', (m) => { if (els.has(m.card.id)) replace(m.card); }));
+  ctx.onLeave(ws.on('match.remove', (m) => { els.get(m.id)?.remove(); els.delete(m.id); st.buffer = st.buffer.filter((c) => c.id !== m.id); paint(); }));
   ctx.onLeave(ws.on('ws:open', () => { if (!st.paused) load(); }));
 }

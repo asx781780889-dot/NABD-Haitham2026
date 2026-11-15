@@ -53,7 +53,7 @@ async function listMatches(q, p) {
   ]);
   return { cards: rows.map(toCard), total: total.n };
 }
-const loadCard = async (id) => { const row = await one(`${CARD_SELECT} WHERE mm.id = $1 AND mm.deleted_at IS NULL`, [id]); if (!row) throw new AppError('NOT_FOUND', { status: 404 }); return toCard(row); };
+const loadCard = async (id) => { const row = await one(`${CARD_SELECT} WHERE mm.id = $1 AND mm.deleted_at IS NULL AND ${BLOCK_FILTER_SQL}`, [id]); if (!row) throw new AppError('NOT_FOUND', { status: 404 }); return toCard(row); };
 
 r.get('/matches', need('viewer'), h(async (req, res) => {
   const p = paging(req.query, { max: 100, def: 30 }); const { cards, total } = await listMatches(req.query, p);
@@ -104,7 +104,7 @@ r.post('/matches/:id/feedback', need('operator'), h(async (req, res) => {
 
 const messagesHandler = h(async (req, res) => {
   const p = paging(req.query, { max: 100, def: 30 }); const q = req.query;
-  const w = where('m.deleted_at IS NULL', 'NOT EXISTS (SELECT 1 FROM blocked_users bu WHERE bu.tg_user_id = m.sender_id)', 'NOT EXISTS (SELECT 1 FROM blocked_sources bs WHERE bs.tg_chat_id = m.tg_chat_id)');
+  const w = where('m.deleted_at IS NULL', "m.skip_reason IS DISTINCT FROM 'blocked_advertisement'", 'NOT EXISTS (SELECT 1 FROM blocked_users bu WHERE bu.tg_user_id = m.sender_id)', 'NOT EXISTS (SELECT 1 FROM blocked_sources bs WHERE bs.tg_chat_id = m.tg_chat_id)');
   if (q.q) nlike(w, 'm.text', q.q); if (q.account_id) w.add('m.account_id = $#', Number(q.account_id)); if (q.source_id) w.add('m.source_id = $#', Number(q.source_id));
   if (q.user_id) w.add('m.sender_id = $#', Number(q.user_id)); if (q.user) nlike(w, ['m.sender_username', 'm.sender_name'], q.user); if (q.state) w.add('m.state = ANY($#::text[])', csv(q.state));
   if (q.from && asDate(q.from)) w.add('m.sent_at >= $#', asDate(q.from)); if (q.to && asDate(q.to)) w.add('m.sent_at <= $#', asDate(q.to));
@@ -144,15 +144,17 @@ r.patch('/saved/:id', need('operator'), h(async (req, res) => {
 r.delete('/saved/:id', need('operator'), h(async (req, res) => { const id = idParam(req); await query('UPDATE saved_results SET deleted_at = now() WHERE id = $1', [id]); await req.audit('SAVED_DELETED', { entity: 'saved', entityId: id }); res.json({ ok: true }); }));
 
 r.get('/blocks', need('viewer'), h(async (req, res) => {
-  const [users, sources, keywords, userCount, sourceCount, keywordCount] = await Promise.all([
+  const [users, sources, keywords, ads, userCount, sourceCount, keywordCount, adCount] = await Promise.all([
     many('SELECT * FROM blocked_users ORDER BY created_at DESC LIMIT 1000'),
     many('SELECT * FROM blocked_sources ORDER BY created_at DESC LIMIT 1000'),
     many('SELECT id, phrase, reason, created_at FROM blocked_keywords ORDER BY created_at DESC LIMIT 1000'),
+    many('SELECT id, sample_text, reason, created_at FROM blocked_advertisements ORDER BY created_at DESC LIMIT 1000'),
     one('SELECT count(*)::int AS n FROM blocked_users'),
     one('SELECT count(*)::int AS n FROM blocked_sources'),
     one('SELECT count(*)::int AS n FROM blocked_keywords'),
+    one('SELECT count(*)::int AS n FROM blocked_advertisements'),
   ]);
-  res.json({ users, sources, keywords, counts: { users: userCount.n, sources: sourceCount.n, keywords: keywordCount.n } });
+  res.json({ users, sources, keywords, ads, counts: { users: userCount.n, sources: sourceCount.n, keywords: keywordCount.n, ads: adCount.n } });
 }));
 r.post('/blocks/users', need('operator'), h(async (req, res) => {
   const b = z.object({ tg_user_id: z.coerce.number().int(), username: z.string().trim().max(64).nullable().optional(), reason: z.string().trim().max(300).optional() }).parse(req.body);
@@ -167,7 +169,7 @@ r.post('/blocks/keywords', need('operator'), h(async (req, res) => {
   if (!normalizeText(b.phrase)) throw new AppError('VALIDATION', { message: 'phrase has no letters or digits' });
   await blockKeyword({ phrase: b.phrase, reason: b.reason ?? null, userId: req.user.id }); await req.audit('KEYWORD_BLOCKED', { details: { phrase: b.phrase } }); res.status(201).json({ ok: true });
 }));
-for (const [path, table] of [['users', 'blocked_users'], ['sources', 'blocked_sources'], ['keywords', 'blocked_keywords']]) {
+for (const [path, table] of [['users', 'blocked_users'], ['sources', 'blocked_sources'], ['keywords', 'blocked_keywords'], ['ads', 'blocked_advertisements']]) {
   r.delete(`/blocks/${path}/:id`, need('operator'), h(async (req, res) => { const id = idParam(req); await query(`DELETE FROM ${table} WHERE id = $1`, [id]); invalidateBlocks(); await req.audit('BLOCK_REMOVED', { entity: table, entityId: id }); res.json({ ok: true }); }));
 }
 

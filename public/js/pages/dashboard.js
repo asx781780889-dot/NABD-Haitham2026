@@ -53,4 +53,5 @@ export default async function dashboard(ctx) {
   const soon = () => { clearTimeout(tm); tm = setTimeout(() => refresh().catch(() => {}), 1200); };
   ctx.onLeave(ws.on('system.status', (m) => paintStatus(m.status))); ctx.onLeave(ws.on('account.status', soon)); ctx.onLeave(ws.on('job.update', soon));
   ctx.onLeave(ws.on('match.new', (m) => { soon(); recent.querySelector('.empty')?.remove(); recent.prepend(matchCard(m.card, { compact: true, fresh: true })); while (recent.children.length > 5) recent.lastChild.remove(); }));
+  ctx.onLeave(ws.on('match.remove', (m) => { recent.querySelector(`[data-id="${m.id}"]`)?.remove(); if (!recent.children.length) recent.append(emptyState(t('Waiting for new matches…'), 'activity')); }));
 }

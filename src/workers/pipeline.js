@@ -9,7 +9,7 @@ import { computePriority, priorityAtLeast } from '../engine/priority.js';
 import { evalNode, applyDecisionActions, newDecision } from '../engine/conditions.js';
 import { fingerprint } from '../engine/dedupe.js';
 import { getCompiled } from '../services/config-cache.js';
-import { checkBlocked } from '../services/blocks.js';
+import { blockUser, checkBlocked, completeWithoutCard, BLOCK_FILTER_SQL } from '../services/blocks.js';
 import { persistCard } from '../services/matches.js';
 import { hydrateCards } from '../services/cards.js';
 import { notifyMatch } from '../services/notifier.js';
@@ -44,6 +44,15 @@ async function finish(ctx, state, reason = null, error = null) {
   await query('UPDATE messages SET state = $2, skip_reason = $3, error = $4, processed_at = now() WHERE id = $1', [ctx.msg.id, state, reason, error]);
   bump({ accountId: ctx.msg.account_id, sourceId: ctx.msg.source_id, messages: 1 });
 }
+async function skipIfBlocked(ctx) {
+  const reason = await checkBlocked({ senderId: ctx.msg.sender_id, tgChatId: ctx.msg.tg_chat_id, analysis: ctx.an, text: ctx.msg.text });
+  if (!reason) return null;
+  if (reason === 'blocked_advertisement' && ctx.msg.sender_id != null) {
+    await blockUser({ tgUserId: ctx.msg.sender_id, username: ctx.msg.sender_username, reason: 'posted a blocked advertisement' });
+  }
+  await finish(ctx, 'skipped', reason);
+  return reason;
+}
 export async function markFailed(messageId, err) {
   const r = await one("UPDATE messages SET state = 'failed', error = $2, processed_at = now() WHERE id = $1 AND state NOT IN ('done','skipped') RETURNING account_id, source_id", [messageId, String(err?.message ?? err).slice(0, 300)]);
   if (r) bump({ accountId: r.account_id, sourceId: r.source_id, errors: 1 });
@@ -59,8 +68,11 @@ export async function stageProcess(messageId) {
   let reason = null;
   if (!ctx.source.monitor) reason = 'source_disabled';
   else if (!ctx.an.tokens.length) reason = 'empty';
-  else reason = await checkBlocked({ senderId: ctx.msg.sender_id, tgChatId: ctx.msg.tg_chat_id, analysis: ctx.an });
-  if (reason) { await finish(ctx, 'skipped', reason); return { skipped: reason }; }
+  else reason = await checkBlocked({ senderId: ctx.msg.sender_id, tgChatId: ctx.msg.tg_chat_id, analysis: ctx.an, text: ctx.msg.text });
+  if (reason) {
+    if (reason === 'blocked_advertisement' && ctx.msg.sender_id != null) await blockUser({ tgUserId: ctx.msg.sender_id, username: ctx.msg.sender_username, reason: 'posted a blocked advertisement' });
+    await finish(ctx, 'skipped', reason); return { skipped: reason };
+  }
   if (ctx.msg.sender_id != null && ctx.an.tokens.length >= 4) {
     try { const fp = fingerprint(ctx.an); await observe({ messageId: ctx.msg.id, senderId: ctx.msg.sender_id, chatId: ctx.msg.tg_chat_id, sourceId: ctx.msg.source_id, normHash: fp.norm, simhash: fp.h, tokensCount: ctx.an.tokens.length }); }
     catch (e) { log.warn('advertiser behavior degraded', { err: e.message }); }
@@ -111,6 +123,7 @@ const fromRow = (r) => ({ isMatch: r.is_match, confidence: r.confidence, intent:
 export async function stageAi(messageId, radarIds, { final = false } = {}) {
   const ctx = await loadContext(messageId);
   if (!ctx || ['done', 'skipped'].includes(ctx.msg.state)) return { skipped: 'already' };
+  const blocked = await skipIfBlocked(ctx); if (blocked) return { skipped: blocked };
   const local = await evaluateLocal(ctx);
   const aiMap = new Map(); let degraded = false;
   const nEx = await getSetting('radar.few_shot_examples');
@@ -157,6 +170,7 @@ async function learnSuggestions(radar, ai, msg, hadKeyword) {
 /** Final stage - merge keyword + AI evidence into candidates, run rules, de-duplicate, persist the card, notify, trigger automations. */
 export async function decide(ctx, local, aiMap, { degraded }) {
   const { msg, an, cfg, source, account } = ctx;
+  const blocked = await skipIfBlocked(ctx); if (blocked) return { matched: false, skipped: blocked };
   const candidates = [];
   for (const s of local.states) {
     const ai = aiMap.get(s.radar.id); const kw = s.kw; let score; let type;
@@ -215,11 +229,11 @@ export async function decide(ctx, local, aiMap, { degraded }) {
     best = { origin: 'rule', aiRuleId: null, keywordId: null, keywordText: null, matchType: 'rule', score: Math.round(ruleScore ?? 100), intent: null, aiConfidence: null, aiReason: null, aiPriority: null, entities: [], contextOk: null, sensitive: false, radarHint: null };
     pr = await prio(best); d.priority ??= pr.priority;
   }
-  void fireTrigger('new_message', { messageId: msg.id, id: msg.id, senderId: msg.sender_id, sourceId: source.id, text: (msg.text ?? '').slice(0, 200) }, { evalCtx, ref: msg.id });
   if (d.suppress || !d.create || !best) {
-    await query("UPDATE messages SET state = 'done', skip_reason = $2, processed_at = now(), error = NULL WHERE id = $1", [msg.id, d.suppress ? 'suppressed' : null]);
+    const blocked = await completeWithoutCard({ messageId: msg.id, senderId: msg.sender_id, username: msg.sender_username, text: msg.text, skipReason: d.suppress ? 'suppressed' : null });
     bump({ accountId: msg.account_id, sourceId: msg.source_id, messages: 1 });
-    return { matched: false };
+    if (!blocked) void fireTrigger('new_message', { messageId: msg.id, id: msg.id, senderId: msg.sender_id, sourceId: source.id, text: (msg.text ?? '').slice(0, 200) }, { evalCtx, ref: msg.id });
+    return blocked ? { matched: false, skipped: 'blocked_advertisement' } : { matched: false };
   }
 
   const priority = d.priority ?? 'low';
@@ -232,20 +246,25 @@ export async function decide(ctx, local, aiMap, { degraded }) {
       adScore, adLabel, adSignals: adResult.signals,
     },
   });
+  if (res.blocked) { await finish(ctx, 'skipped', 'blocked_advertisement'); return { matched: false, skipped: 'blocked_advertisement' }; }
   bump({ accountId: msg.account_id, sourceId: msg.source_id, messages: 1, ...(res.created ? { matches: 1, high: priorityAtLeast(priority, 'high') ? 1 : 0 } : {}), ...(res.duplicate ? { duplicates: 1 } : {}) });
+  const visible = await one(`SELECT 1 FROM message_matches mm WHERE mm.id = $1 AND mm.deleted_at IS NULL AND mm.status <> 'ignored' AND ${BLOCK_FILTER_SQL}`, [res.id]);
+  if (visible) void fireTrigger('new_message', { messageId: msg.id, id: msg.id, senderId: msg.sender_id, sourceId: source.id, text: (msg.text ?? '').slice(0, 200) }, { evalCtx, ref: msg.id });
   if (res.created) {
     if (best.aiRuleId) bumpRadar(best.aiRuleId);
     if (best.keywordId) bumpKeyword(best.keywordId);
     const [card] = await hydrateCards([res.id]);
-    if (card) {
+    if (card && visible) {
       await notifyMatch(card, d.forceChannels);
       if (d.save) await saveMatch(res.id);
       const payload = { matchId: res.id, id: res.id, priority, score: best.score, intent: best.intent, source: card.source.title, senderId: msg.sender_id, senderUsername: msg.sender_username, sourceId: source.id, accountId: account.id, text: (msg.text ?? '').slice(0, 200) };
       await fireTrigger('new_match', payload, { evalCtx: { ...evalCtx, priority }, ref: res.id });
       if (priorityAtLeast(priority, 'high')) await fireTrigger('high_priority_match', payload, { evalCtx: { ...evalCtx, priority }, ref: res.id });
     }
-    const radar = best.aiRuleId ? cfg.radars.find((r) => r.id === best.aiRuleId) : null;
-    if (radar) await learnSuggestions(radar, aiMap.get(radar.id), msg, !!local.states.find((s) => s.radar.id === radar.id)?.kw);
+    if (card && visible) {
+      const radar = best.aiRuleId ? cfg.radars.find((r) => r.id === best.aiRuleId) : null;
+      if (radar) await learnSuggestions(radar, aiMap.get(radar.id), msg, !!local.states.find((s) => s.radar.id === radar.id)?.kw);
+    }
   }
   return { matched: true, cardId: res.id, created: res.created, duplicate: res.duplicate };
 }

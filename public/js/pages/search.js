@@ -1,6 +1,7 @@
 import { h, clear } from '../lib/dom.js';
 import { t, fmt } from '../lib/i18n.js';
 import { get } from '../lib/api.js';
+import * as ws from '../lib/ws.js';
 import { pageHead, btn, form, card, table, pager, errorBox, exportMenu, emptyState, badge, skeletons } from '../lib/ui.js';
 import { matchCard } from '../lib/card.js';
 
@@ -30,5 +31,6 @@ export default async function search(ctx) {
   }
   f.el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') run(); });
   ctx.root.append(pageHead(t('Advanced search'), null), card(null, h('div', { class: 'stack' }, f.el, h('div', { class: 'row' }, btn(t('Search'), () => run(), { kind: 'primary', ic: 'search' }), btn(t('Clear'), () => { ctx.reload(); }, {})))), h('div', { style: { height: '14px' } }), out);
+  ctx.onLeave(ws.on('match.remove', () => run(false)));
   if (ctx.query.q) run();
 }

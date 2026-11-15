@@ -7,6 +7,7 @@ import { scoreAd } from '../../engine/adscore.js';
 import { getCompiled, invalidateCompiled } from '../../services/config-cache.js';
 import { classifyAd } from '../../ai/analyzer.js';
 import { aiAvailable } from '../../ai/manager.js';
+import { blockAdvertisement } from '../../services/blocks.js';
 const r = express.Router();
 const textBody = z.object({ text: z.string().trim().min(1).max(8000), has_media: z.boolean().optional() });
 r.get('/advertisers', need('viewer'), h(async (req, res) => {
@@ -25,8 +26,13 @@ r.post('/ads/test', need('viewer'), h(async (req, res) => {
 }));
 r.post('/ads/feedback', need('operator'), h(async (req, res) => {
   const b = z.object({ text: z.string().trim().min(1).max(1000), label: z.enum(['ad', 'not_ad']), match_id: z.coerce.number().int().positive().nullable().optional(), tg_user_id: z.coerce.number().int().nullable().optional() }).parse(req.body);
+  if (b.label === 'ad') {
+    const result = await blockAdvertisement({ text: b.text, matchId: b.match_id ?? null, userId: req.user.id });
+    await req.audit('AD_FEEDBACK', { entity: 'ad_example', details: { label: b.label, matchId: b.match_id ?? null, blockedMessages: result.blocked_messages, blockedUsers: result.blocked_users } });
+    return res.status(201).json({ ok: true, blocked_advertisement: true, ...result });
+  }
   await query('INSERT INTO ad_examples (text,label,match_id,tg_user_id,created_by) VALUES ($1,$2,$3,$4,$5)', [b.text, b.label, b.match_id ?? null, b.tg_user_id ?? null, req.user.id]);
-  if (b.match_id) await query('UPDATE message_matches SET ad_label=$2, ad_score=CASE WHEN $2=\'ad\' THEN GREATEST(COALESCE(ad_score,0),70) ELSE LEAST(COALESCE(ad_score,0),30) END WHERE id=$1', [b.match_id, b.label === 'ad' ? 'ad' : 'clean']);
+  if (b.match_id) await query('UPDATE message_matches SET ad_label=\'clean\', ad_score=LEAST(COALESCE(ad_score,0),30) WHERE id=$1', [b.match_id]);
   await req.audit('AD_FEEDBACK', { entity: 'ad_example', details: { label: b.label, matchId: b.match_id ?? null } });
   res.status(201).json({ ok: true });
 }));

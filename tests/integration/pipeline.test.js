@@ -184,6 +184,41 @@ test('feedback, pin/ignore, save + export, block user/source from a card, search
   const bu = (await h.ok('GET', '/api/blocks')).users.find((u) => u.tg_user_id === S.c2.sender.id); await h.ok('DELETE', `/api/blocks/users/${bu.id}`);
 });
 
+test('ad triangle: blocks normalized duplicate text and every current/future publisher', async () => {
+  const adText = 'السلام عليكم احتاج مساعدة في مشروع التخرج للتواصل واتساب 0551234567';
+  deliver(PHONE1, msg(adText, { senderId: 88001, senderUsername: 'ad_one' }));
+  const ad = await settle(adText);
+  const variant = 'السلاااام عليكم أحتاج مُسَاعَدَة في مشروع التخرج للتواصل واتساب 0551234567!!!';
+  await h.db.query(
+    `INSERT INTO messages (account_id,source_id,tg_chat_id,tg_message_id,sender_id,sender_username,sender_name,text,lang,sent_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'ar',now())`,
+    [acc1, S.hub1.id, HUB, 998877, 88002, 'ad_two', 'Ad Two', variant]);
+  const result = await h.ok('POST', '/api/ads/feedback', { text: adText, label: 'ad', match_id: ad.id, tg_user_id: ad.sender.id });
+  assert.equal(result.blocked_messages, 2); assert.equal(result.blocked_users, 2);
+  const blocked = (await h.ok('GET', '/api/blocks')).users.map((u) => u.tg_user_id);
+  assert.ok(blocked.includes(88001) && blocked.includes(88002), 'all known publishers are blocked');
+  assert.equal((await h.db.one("SELECT count(*)::int AS n FROM messages WHERE sender_id = ANY($1::bigint[]) AND skip_reason = 'blocked_advertisement'", [[88001, 88002]])).n, 2);
+  assert.ok(!(await cards()).some((c) => c.text === adText), 'the old card is hidden');
+  assert.equal((await h.api('GET', `/api/matches/${ad.id}`)).status, 404, 'direct lookup cannot reveal the blocked card');
+
+  deliver(PHONE1, msg(adText, { senderId: 88003, senderUsername: 'ad_three', tgMessageId: 998878 }));
+  await waitFor(async () => {
+    const row = await h.db.one('SELECT state,skip_reason FROM messages WHERE tg_message_id = $1 AND sender_id = $2', [998878, 88003]);
+    return row?.state === 'skipped' && row.skip_reason === 'blocked_advertisement';
+  }, { label: 'future copy of blocked ad is skipped' });
+  assert.ok((await h.ok('GET', '/api/blocks')).users.some((u) => u.tg_user_id === 88003), 'future publisher is blocked too');
+  const queued = await h.db.one(
+    `INSERT INTO messages (account_id,source_id,tg_chat_id,tg_message_id,sender_id,sender_username,sender_name,text,lang,sent_at,state)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'ar',now(),'processing') RETURNING id`,
+    [acc1, S.hub1.id, HUB, 998879, 88004, 'ad_four', 'Ad Four', adText]);
+  const { completeWithoutCard } = await import('../../src/services/blocks.js');
+  assert.equal(await completeWithoutCard({ messageId: queued.id, senderId: 88004, username: 'ad_four', text: adText }), true);
+  assert.equal((await h.db.one('SELECT skip_reason FROM messages WHERE id = $1', [queued.id])).skip_reason, 'blocked_advertisement');
+  const adBlock = (await h.ok('GET', '/api/blocks')).ads.find((r) => r.sample_text === adText);
+  assert.ok(adBlock, 'blocked ad text is listed for review');
+  await h.ok('DELETE', `/api/blocks/ads/${adBlock.id}`);
+});
+
 test('history scan task: progress, completion; analytics, tasks API, workers control, metrics', async () => {
   h.world.history.set(HUB, [1, 2, 3].map((i) => ({ chatId: HUB, kind: 'supergroup', title: 'Students Hub', tgMessageId: i, senderId: 300 + i, senderUsername: `old${i}`, senderName: `Old ${i}`, text: i === 2 ? 'ابي احد يساعدني في مشروع التخرج لو سمحتم' : `رسالة قديمة رقم ${i}`, date: new Date(Date.now() - i * 3600000) })));
   const t = await h.ok('POST', `/api/sources/${S.hub1.id}/scan`, { limit: 10 });

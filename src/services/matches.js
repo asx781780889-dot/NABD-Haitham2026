@@ -2,7 +2,7 @@
 import { tx } from '../lib/db.js';
 import { getSettings } from '../lib/settings.js';
 import { publish } from '../lib/bus.js';
-import { normalizeText } from '../engine/normalize.js';
+import { adFingerprint, normalizeText } from '../engine/normalize.js';
 import { bandDistance, isDuplicate, textSimilarity } from '../engine/dedupe.js';
 import { isChannelId } from '../telegram/links.js';
 
@@ -37,6 +37,15 @@ export async function persistCard(i) {
   const { msg, fp, card } = i;
   return tx(async (c) => {
     await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`dedupe:${msg.sender_id ?? msg.tg_chat_id}`]);
+    const fingerprint = adFingerprint(msg.text ?? '');
+    await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`blocked-ad:${fingerprint}`]);
+    if ((await c.query('SELECT 1 FROM blocked_advertisements WHERE fingerprint = $1', [fingerprint])).rowCount) {
+      if (msg.sender_id != null) await c.query(
+        `INSERT INTO blocked_users (tg_user_id, username, reason) VALUES ($1,$2,'posted a blocked advertisement') ON CONFLICT (tg_user_id) DO NOTHING`,
+        [msg.sender_id, msg.sender_username ?? null]);
+      await c.query("UPDATE messages SET state = 'skipped', skip_reason = 'blocked_advertisement', processed_at = now() WHERE id = $1", [msg.id]);
+      return { id: null, created: false, duplicate: false, blocked: true };
+    }
     const done = () => c.query("UPDATE messages SET state = 'done', processed_at = now(), error = NULL WHERE id = $1", [msg.id]);
     const ex = (await c.query('SELECT id FROM message_matches WHERE message_id = $1', [msg.id])).rows[0];
     if (ex) { await done(); return { id: ex.id, created: false, duplicate: false }; }

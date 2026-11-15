@@ -24,8 +24,8 @@ async function ruleFromCard(c) {
 
 export function matchCard(c, { onChange, onRemove, fresh = false, compact = false } = {}) {
   const op = can('operator'); const who = c.sender.username ? `@${c.sender.username}` : c.sender.name || (c.sender.id ?? '—');
-  const act = (fn) => async () => { try { await fn(); const nc = (await get(`/matches/${c.id}`)).data; onChange?.(nc); } catch (e) { showError(e); } };
-  const remove = async (fn) => { try { await fn(); onRemove?.(c); } catch (e) { showError(e); } };
+  const act = (fn) => async () => { try { const result = await fn(); if (result?.blocked_advertisement) { if (onRemove) onRemove(c); else el.remove(); return; } const nc = (await get(`/matches/${c.id}`)).data; if (nc.status === 'ignored') { if (onRemove) onRemove(c); else el.remove(); } else onChange?.(nc); } catch (e) { showError(e); } };
+  const remove = async (fn) => { try { await fn(); if (onRemove) onRemove(c); else el.remove(); } catch (e) { showError(e); } };
   const tip = (ic, title, fn, kind) => iconBtn(ic, title, fn, kind);
   const el = h('article', { class: `mc p-${c.priority} ${fresh ? 'fresh' : ''} ${c.status === 'ignored' ? 'ignored' : ''}`, 'data-id': c.id },
     h('div', { class: 'ring', style: { '--p': c.score, '--ringc': RING[c.priority] }, title: t('Match') }, h('b', null, `${Math.round(c.score)}%`)),
@@ -53,7 +53,7 @@ export function matchCard(c, { onChange, onRemove, fresh = false, compact = fals
       op && h('span', { class: 'end row tight' },
         tip('up', t('Correct match'), act(() => post(`/matches/${c.id}/feedback`, { value: 'correct' })), c.feedback === 'correct' ? 'on' : ''),
         tip('dn', t('Incorrect match'), act(() => post(`/matches/${c.id}/feedback`, { value: 'incorrect' })), c.feedback === 'incorrect' ? 'on' : ''),
-        op && tip('megaphone', t('Advertiser'), act(() => post('/ads/feedback', { text: (c.text ?? '').slice(0, 1000), label: 'ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'ad' ? 'on' : ''),
+        op && tip('megaphone', t('Block ad text and all publishers'), act(() => post('/ads/feedback', { text: (c.text ?? '').slice(0, 1000), label: 'ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'ad' ? 'on' : ''),
         op && tip('user', t('Not an advertiser'), act(() => post('/ads/feedback', { text: (c.text ?? '').slice(0, 1000), label: 'not_ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'clean' ? 'on' : ''))));
   return el;
 }

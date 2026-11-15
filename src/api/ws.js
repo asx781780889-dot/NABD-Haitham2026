@@ -40,7 +40,7 @@ export function attachWebSocket(server) {
       const cards = await hydrateCards(batch.map(([id]) => id));
       const { users, sources } = await blockedSets(); const kinds = new Map(batch);
       for (const c of cards) {
-        if ((c.sender.id != null && users.has(c.sender.id)) || sources.has(c.source.tg_chat_id) || c.status === 'ignored') continue;
+        if ((c.sender.id != null && users.has(c.sender.id)) || sources.has(c.source.tg_chat_id) || c.status === 'ignored') { broadcast({ t: 'match.remove', id: c.id }); continue; }
         const plan = await channelPlan(c.priority, new Set(c.force_channels));
         broadcast({ t: kinds.get(c.id), card: c, ui: { browser: plan.browser, sound: plan.sound } });
       }

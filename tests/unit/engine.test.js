@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 process.env.NODE_ENV = 'test'; process.env.DATABASE_URL ??= 'postgres://x'; process.env.MASTER_KEY ??= 'k'.repeat(40);
-const { normalizeText, analyze, detectLang, buildCanon } = await import('../../src/engine/normalize.js');
+const { normalizeText, normalizeAdText, adFingerprint, analyze, detectLang, buildCanon } = await import('../../src/engine/normalize.js');
 const { compileKeyword, evaluateKeyword, evaluateKeywords, quickMatch, radarPrefilter, compileSignals } = await import('../../src/engine/keywords.js');
 const { levenshtein, similarity, simhash, hamming, squash } = await import('../../src/engine/similarity.js');
 const { computePriority } = await import('../../src/engine/priority.js');
@@ -15,6 +15,12 @@ test('normalization: diacritics, hamza, ta marbuta, elongation, digits, symbols'
   assert.equal(normalizeText('أَحْتَاجُ مُسَاعَدَةً!!'), 'احتاج مساعده');
   assert.equal(normalizeText('مساااااعدة'), 'مساعده');
   assert.equal(normalizeText('رقم ٣٤٥ 😀 Hello,WORLD'), 'رقم 345 hello world');
+});
+test('blocked advertisement fingerprints match Arabic formatting and punctuation variants', () => {
+  assert.equal(adFingerprint('أحتاج مُسَاعَدَة للتواصل واتساب!!!'), adFingerprint('احتاج مساعدة  للتواصل، واتساب'));
+  assert.equal(adFingerprint('السلام عليكم احتاج مساعدة'), adFingerprint('السلاااام عليكم أحتاج مُسَاعَدَة!!!'));
+  assert.notEqual(normalizeAdText('😀'), normalizeAdText('🔥'));
+  assert.notEqual(adFingerprint('أحتاج مساعدة للتواصل واتساب'), adFingerprint('أحتاج مساعدة للتواصل تيليجرام'));
 });
 test('spec examples: all dialect variants of "احتاج مساعدة" reach the same intent keyword', () => {
   const k = kw('احتاج مساعدة');
