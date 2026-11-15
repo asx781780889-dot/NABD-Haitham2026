@@ -50,7 +50,7 @@ export function matchCard(c, { onChange, onRemove, fresh = false, compact = fals
       op && c.sender.id != null && tip('ban', t('Block user'), async () => { if (await confirmBox(t('Block this user? Their messages will be hidden everywhere.'), { danger: true, ok: t('Block') })) remove(() => post(`/matches/${c.id}/block-user`)); }, 'danger'),
       op && tip('shield', t('Block group'), async () => { if (await confirmBox(t('Block this group? Its results will be hidden everywhere.'), { danger: true, ok: t('Block') })) remove(() => post(`/matches/${c.id}/block-source`)); }, 'danger'),
       op && tip('trash', t('Delete'), async () => { if (await confirmBox(t('Delete this card?'), { danger: true, ok: t('Delete') })) remove(() => del(`/matches/${c.id}`)); }, 'danger'),
-      op && h('span', { class: 'end row tight' },
+      op && h('span', { class: 'end row tight feedback-actions' },
         tip('up', t('Correct match'), act(() => post(`/matches/${c.id}/feedback`, { value: 'correct' })), c.feedback === 'correct' ? 'on' : ''),
         tip('dn', t('Incorrect match'), act(() => post(`/matches/${c.id}/feedback`, { value: 'incorrect' })), c.feedback === 'incorrect' ? 'on' : ''),
         op && tip('megaphone', t('Block ad text and all publishers'), act(() => post('/ads/feedback', { text: (c.text ?? '').slice(0, 1000), label: 'ad', match_id: c.id, tg_user_id: c.sender.id })), c.ad_label === 'ad' ? 'on' : ''),
