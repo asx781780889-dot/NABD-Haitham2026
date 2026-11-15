@@ -105,6 +105,14 @@ test('Smart Radar: AI draft -> operator confirms -> active', async () => {
   const t = await h.ok('POST', `/api/radar/${radarId}/test`, { text: 'احتاج مساعدة في مشروع التخرج', use_ai: true }); assert.ok(t.data.keyword.score >= 90); assert.equal(t.data.ai.isMatch, true);
 });
 
+test('Smart Radar test includes keywords linked from the Keywords page', async () => {
+  await h.ok('POST', '/api/keywords', { phrase: 'احتاج', match_modes: ['exact', 'partial', 'fuzzy', 'semantic'], fuzzy_threshold: 82, context_mode: 'none', context_strict: false, min_score: 60, weight: 100, is_sensitive: false, enabled: true, ai_rule_id: radarId, variants: [] });
+  const t = await h.ok('POST', `/api/radar/${radarId}/test`, { text: 'احتاج', use_ai: false });
+  assert.ok(t.data.keyword, 'linked keyword should produce a test hit');
+  assert.equal(t.data.keyword.phrase, 'احتاج');
+  assert.equal(t.data.keyword.aiRuleId, radarId);
+});
+
 test('pipeline: keyword hit, semantic (AI) hit, ignored noise, blocked user, unmonitored source, live WebSocket', async () => {
   const live = h.openWs(); await live.ready;
   const exact = 'السلام عليكم احتاج مساعدة في مشروع التخرج';

@@ -76,7 +76,11 @@ r.post('/radar/:id/test', need('operator'), h(async (req, res) => {
   const radar = await one('SELECT * FROM ai_rules WHERE id = $1 AND deleted_at IS NULL', [id]); if (!radar) throw new AppError('NOT_FOUND', { status: 404 });
   const cfg = await getCompiled(); const an = analyze(text, cfg.canon);
   const kw = compileKeyword({ id: null, ai_rule_id: id, phrase: '', match_modes: ['exact', 'partial', 'fuzzy'], fuzzy_threshold: 82, context_mode: radar.context_mode, context_strict: false, min_score: radar.min_score, weight: 100, is_sensitive: false }, radar.signals.map((p) => ({ phrase: p, kind: 'signal' })), cfg.canon);
-  const hits = evaluateKeywords(an, [kw]);
+  // The live pipeline evaluates both radar signals and keyword rows linked through ai_rule_id.
+  // Keep the dry-run test consistent so phrases added from the Keywords page (e.g. "احتاج")
+  // are visible here as well.
+  const linked = cfg.keywords.filter((k) => k.aiRuleId === id);
+  const hits = evaluateKeywords(an, [kw, ...linked]);
   let ai = null; let ai_error = null;
   if (use_ai) { if (!(await aiAvailable())) ai_error = 'AI_NOT_CONFIGURED'; else try { ai = await analyzeForRadar({ radar, text, normHash: fingerprint(an).norm, sourceTitle: 'test', examples: [] }); } catch (e) { ai_error = e.code ?? e.message; } }
   res.json({ data: { normalized: an.norm, keyword: hits[0] ?? null, ai, ai_error, min_score: radar.min_score } });
