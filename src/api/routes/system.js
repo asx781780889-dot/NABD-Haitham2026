@@ -38,8 +38,8 @@ r.post('/system/pause', need('admin'), reauth, h(async (req, res) => {
   await req.audit(paused ? 'SYSTEM_PAUSED' : 'SYSTEM_RESUMED');
   res.json({ ok: true, paused });
 }));
-r.get('/system/overview', need('viewer'), h(async (req, res) => res.json({ stats: await overview(), status: await systemStatus(true) })));
-r.get('/system/status', need('viewer'), h(async (req, res) => res.json({ status: await systemStatus(true) })));
+r.get('/system/overview', need('viewer'), h(async (req, res) => res.json({ stats: await overview(), status: await systemStatus() })));
+r.get('/system/status', need('viewer'), h(async (req, res) => res.json({ status: await systemStatus() })));
 r.get('/system/workers', need('viewer'), h(async (req, res) => {
   const rows = await workerRows(); const by = new Map(rows.map((w) => [w.name, w]));
   res.json({ process_online: rows.some((w) => w.online), data: WORKERS.map((n) => { const w = by.get(n); return w ? { ...w, status: w.online ? w.status : 'offline' } : { name: n, status: 'offline', online: false, processed: 0, failed: 0 }; }) });
