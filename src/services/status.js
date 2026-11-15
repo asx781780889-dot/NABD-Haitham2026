@@ -7,6 +7,7 @@ import { databaseStatus } from './dbmonitor.js';
 import { getSetting } from '../lib/settings.js';
 
 let cache = { at: 0, v: null };
+let overviewCache = { at: 0, v: null };
 const S = (status, detail, extra = {}) => ({ status, detail, ...extra });
 
 export async function workerRows() {
@@ -22,9 +23,9 @@ export async function systemStatus(force = false) {
   const out = { api: S('online', `pid ${process.pid}`, { uptime_s: Math.round(process.uptime()) }) };
   try { const ms = await dbPing(); out.database = S('online', `${ms} ms`); } catch (e) { out.database = S('error', e.message); }
   if (out.database.status === 'error') { cache = { at: Date.now(), v: { ...out, redis: S('offline', '-'), queue: S('offline', '-'), workers: S('offline', '-'), scheduler: S('offline', '-'), telegram: S('offline', '-'), ai: S('offline', '-'), storage: S('offline', '-') } }; return cache.v; }
-  const [redis, counts, workers, accounts, chain, providers, db] = await Promise.all([pingRedis(), queueCounts(), workerRows(), many("SELECT status FROM telegram_accounts WHERE deleted_at IS NULL"), activeChain().catch(() => []), providersSnapshot().catch(() => []), databaseStatus().catch(() => null)]);
+  const [redis, counts, workers, accounts, chain, providers, db] = await Promise.all([pingRedis(), queueCounts().catch(() => null), workerRows(), many("SELECT status FROM telegram_accounts WHERE deleted_at IS NULL"), activeChain().catch(() => []), providersSnapshot().catch(() => []), databaseStatus().catch(() => null)]);
   out.redis = redis.ok ? S('online', `${redis.latencyMs} ms`) : S('offline', redisState.lastError ?? 'unreachable');
-  if (!redis.ok) out.queue = S('offline', 'Redis unavailable: degraded inline processing');
+  if (!redis.ok || !counts) out.queue = S('offline', 'Redis or queue service unavailable');
   else {
     const sum = (k) => Object.values(counts).reduce((a, c) => a + (c?.[k] ?? 0), 0);
     const failed = sum('failed'); const waiting = sum('waiting') + sum('delayed');
@@ -45,7 +46,8 @@ export async function systemStatus(force = false) {
   cache = { at: Date.now(), v: out }; return out;
 }
 
-export async function overview() {
+export async function overview(force = false) {
+  if (!force && Date.now() - overviewCache.at < 3000 && overviewCache.v) return overviewCache.v;
   const r = await one(`SELECT
     (SELECT count(*)::int FROM telegram_accounts WHERE deleted_at IS NULL) AS accounts_total,
     (SELECT count(*)::int FROM telegram_accounts WHERE deleted_at IS NULL AND status = 'connected') AS accounts_connected,
@@ -62,5 +64,7 @@ export async function overview() {
     (SELECT count(*)::int FROM jobs WHERE state = 'failed') AS tasks_failed,
     (SELECT count(*)::int FROM messages WHERE created_at > now() - interval '1 minute') AS messages_last_minute,
     (SELECT count(*)::int FROM messages WHERE state = 'pending') AS messages_pending`);
-  return { ...r, processing_paused: await getSetting('processing.paused') };
+  const value = { ...r, processing_paused: await getSetting('processing.paused') };
+  overviewCache = { at: Date.now(), v: value };
+  return value;
 }
