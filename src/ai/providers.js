@@ -24,8 +24,21 @@ async function http(url, { method = 'POST', headers = {}, body, timeoutMs = 2000
   } finally { clearTimeout(timer); }
 }
 
+const GEMINI_DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+// Base URLs that belong to other providers (e.g. a Grok URL pasted into the Gemini card) must never be used for Gemini.
+const FOREIGN_HOSTS = new Set(['api.x.ai', 'api.openai.com', 'api.anthropic.com', 'api.groq.com']);
+function geminiBase(raw) {
+  const u = String(raw || '').trim();
+  if (!u) return GEMINI_DEFAULT_BASE;
+  try { if (FOREIGN_HOSTS.has(new URL(u).hostname)) return GEMINI_DEFAULT_BASE; } catch { return GEMINI_DEFAULT_BASE; }
+  return u.replace(/\/+$/, '');
+}
+
 function gemini(cfg) {
-  const base = (cfg.baseUrl || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '');
+  const base = geminiBase(cfg.baseUrl);
+  if (!/^(?:gemini|gemma)/i.test(String(cfg.model || ''))) {
+    return { id: 'gemini', async complete() { throw new ProviderError(`model "${cfg.model}" is not a Gemini model (use e.g. gemini-3.8-flash)`); }, async listModels() { throw new ProviderError('invalid Gemini model name'); } };
+  }
   const headers = { 'x-goog-api-key': cfg.apiKey };
   return {
     id: 'gemini',
